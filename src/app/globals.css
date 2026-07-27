@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+:root {
+  /* Ink — deep charcoal-navy, the app's base */
+  --ink: #14181f;
+  --ink-soft: #1d232c;
+
+  /* Paper — warm ivory, used for cards, not full backgrounds */
+  --paper: #f6f1e7;
+  --paper-dim: #ece4d3;
+
+  /* Gold — antique, restrained accent for CTAs and dividers */
+  --gold: #c9a24b;
+  --gold-soft: #e3c887;
+
+  /* Jade — Peranakan-tile inspired, secondary accent */
+  --jade: #1f5c4e;
+
+  /* Maroon — batik-inspired, tertiary accent for warmth */
+  --maroon: #7a2e2e;
+
+  --text-on-ink: #ede7da;
+  --text-on-paper: #1b1b18;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-paper: var(--paper);
+  --color-paper-dim: var(--paper-dim);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-jade: var(--jade);
+  --color-maroon: var(--maroon);
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-plex);
+}
+
+body {
+  background: var(--ink);
+  color: var(--text-on-ink);
+  font-family: var(--font-plex), Arial, sans-serif;
+}
+
+/* Interlace motif — signature divider, two lines weaving,
+   referencing two lives joining. Used sparingly. */
+.interlace {
+  position: relative;
+  height: 18px;
+  overflow: hidden;
+}
+.interlace::before,
+.interlace::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--gold-soft);
+  opacity: 0.55;
+}
+.interlace::before {
+  transform: translateY(-3px) scaleX(1);
+  border-radius: 50%;
+}
+.interlace::after {
+  transform: translateY(3px) scaleX(1);
+}
