@@ -108,7 +108,7 @@ export default function PersonalityTestPage() {
       setError(error.message);
       return;
     }
-    router.push("/dashboard/matches");
+    router.push("/onboarding/profile");
   }
 
   return (

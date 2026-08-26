@@ -1,31 +1,51 @@
 -- Run this in the Supabase SQL editor after creating your project.
--- Reflects the MarryMe.sg matching mechanic: see
--- marryme-sg-concept-and-features.md for the full spec.
+--
+-- Matching mechanic (see the MarryMe.sg build spec, Phases 1 & 3):
+-- each user gets a weekly batch of 5 curated matches, can express
+-- interest in up to 2 of them, and a mutual match unlocks chat.
+-- Faith is a hard filter, not a preference: if faith matters to a
+-- user, they only see faith-compatible candidates; if it doesn't,
+-- they only see other users for whom it also doesn't.
 
+create extension if not exists pgcrypto;
+
+-- ============================================================
+-- profiles
+-- ============================================================
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
+
   full_name text,
-  age int,
-  gender text,
-  community text,          -- e.g. Chinese, Malay, Indian, Eurasian, Other
-  occupation text,
+  date_of_birth date,
+  gender text check (gender in ('male', 'female')),
+  photos text[] not null default '{}',
   bio text,
-  photo_url text,
-  role text default 'member',      -- 'member' or 'admin'
-  status text default 'pending',   -- 'pending', 'approved', 'suspended'
+  location text,
+  occupation text,
 
-  -- Relationship state machine — a member is in exactly one of these
-  -- at a time, which drives whether they're eligible for a new set
-  -- of 5 matches.
-  relationship_status text default 'seeking',
-  -- 'seeking'      -> eligible to receive/choose from a match set
-  -- 'talking'       -> actively pursuing one chosen match (Section 4: one at a time)
-  -- 'cooling_off'   -> broke up, in the 2-week window (Section 5)
-  -- 'engaged'       -> chose to marry, eligible for counselling (Section 6)
-  -- 'married'       -> eligible for the free wedding photoshoot (Section 7)
-  cooling_off_until timestamptz,
+  role text not null default 'member',     -- 'member' | 'admin'
+  status text not null default 'pending',  -- 'pending' | 'approved' | 'suspended'
 
-  created_at timestamptz default now()
+  -- Faith is asked once, up front, and gates matching rather than
+  -- just scoring it (Phase 2 & 3). Never shown or asked again if
+  -- the user says it doesn't matter to them.
+  faith_matters_to_them boolean not null default false,
+  own_faith text,
+  open_to_other_faith boolean,
+
+  years_out_of_relationship int,
+
+  -- Standard matching preferences, collected at onboarding.
+  preferred_gender text check (preferred_gender in ('male', 'female')),
+  preferred_age_min int,
+  preferred_age_max int,
+  preferred_location text,
+
+  created_at timestamptz not null default now(),
+
+  constraint faith_fields_only_when_relevant check (
+    faith_matters_to_them = true or (own_faith is null and open_to_other_faith is null)
+  )
 );
 
 alter table public.profiles enable row level security;
@@ -34,16 +54,38 @@ create policy "Users can view approved profiles"
   on public.profiles for select
   using (status = 'approved' or auth.uid() = id);
 
-create policy "Users can update their own profile"
-  on public.profiles for update
-  using (auth.uid() = id);
-
 create policy "Users can insert their own profile"
   on public.profiles for insert
   with check (auth.uid() = id);
 
--- Personality test responses (Section 3). Raw answers stored as JSON;
--- the matching job reads these to assemble each week's set of 5.
+create policy "Users can update their own profile"
+  on public.profiles for update
+  using (auth.uid() = id);
+
+-- Auto-create a bare profile row on signup so every later step
+-- (onboarding, matching) can assume one exists.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id) values (new.id)
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- ============================================================
+-- personality_responses (kept from onboarding; informational only —
+-- not currently a matching input, see engine.ts)
+-- ============================================================
 create table if not exists public.personality_responses (
   id uuid primary key default gen_random_uuid(),
   profile_id uuid references public.profiles(id) on delete cascade unique,
@@ -57,154 +99,188 @@ create policy "Users can manage their own personality responses"
   on public.personality_responses for all
   using (auth.uid() = profile_id);
 
--- One row per weekly release of 5 matches for a given member
--- (Section 2.1). A new row is only created once a week, and only
--- if the member is currently 'seeking'.
-create table if not exists public.match_sets (
-  id uuid primary key default gen_random_uuid(),
-  member_id uuid references public.profiles(id) on delete cascade,
-  week_starting date not null,
-  created_at timestamptz default now(),
-  unique (member_id, week_starting)
-);
-
-alter table public.match_sets enable row level security;
-
-create policy "Users can view their own match sets"
-  on public.match_sets for select
-  using (auth.uid() = member_id);
-
--- The 5 candidate profiles inside a given match_set.
-create table if not exists public.match_set_candidates (
-  id uuid primary key default gen_random_uuid(),
-  match_set_id uuid references public.match_sets(id) on delete cascade,
-  candidate_profile_id uuid references public.profiles(id) on delete cascade,
-  -- 'available'   -> candidate not yet spoken for
-  -- 'unavailable' -> candidate is currently 'talking' with someone else
-  -- 'chosen'      -> this member chose this candidate (Section 2.3)
-  status text default 'available'
-);
-
-alter table public.match_set_candidates enable row level security;
-
-create policy "Users can view candidates in their own match sets"
-  on public.match_set_candidates for select
-  using (
-    exists (
-      select 1 from public.match_sets
-      where match_sets.id = match_set_candidates.match_set_id
-      and match_sets.member_id = auth.uid()
-    )
-  );
-
--- Waitlist / queuing rule from Section 2.3: if member A chooses
--- candidate B while B is unavailable, this records A's interest so
--- B can be offered to A first if B becomes free again. Ordered
--- first-come-first-served by created_at (open question from the
--- spec — FIFO is the simplest default).
-create table if not exists public.match_waitlist (
-  id uuid primary key default gen_random_uuid(),
-  interested_profile_id uuid references public.profiles(id) on delete cascade,
-  target_profile_id uuid references public.profiles(id) on delete cascade,
-  created_at timestamptz default now(),
-  -- 'waiting' -> still queued
-  -- 'offered' -> target became available, this person was notified
-  -- 'expired' -> offer window passed without a response
-  -- 'matched' -> resulted in an actual match
-  status text default 'waiting'
-);
-
-alter table public.match_waitlist enable row level security;
-
-create policy "Users can view their own waitlist entries"
-  on public.match_waitlist for select
-  using (auth.uid() = interested_profile_id);
-
--- An active or past pairing between two members.
+-- ============================================================
+-- matches — one row per (user, candidate) in a curated batch.
+-- batch_id is shared by the 5 rows generated for a user at once.
+-- ============================================================
 create table if not exists public.matches (
   id uuid primary key default gen_random_uuid(),
-  member_a_id uuid references public.profiles(id) on delete cascade,
-  member_b_id uuid references public.profiles(id) on delete cascade,
-  -- 'talking' -> Section 4, one active match at a time
-  -- 'cooling_off' -> Section 5, 2-week window after a breakup
-  -- 'reconciled' -> patched up during cooling-off
-  -- 'ended' -> cooling-off passed, both released to a new match set
-  -- 'engaged' / 'married' -> Sections 6 & 7
-  status text default 'talking',
-  cooling_off_until timestamptz,
-  created_at timestamptz default now()
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  matched_user_id uuid not null references public.profiles(id) on delete cascade,
+  batch_id uuid not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '7 days'),
+
+  constraint matches_not_self check (user_id <> matched_user_id),
+  unique (user_id, batch_id, matched_user_id)
 );
+
+create index if not exists idx_matches_user_batch on public.matches (user_id, batch_id);
+create index if not exists idx_matches_expires_at on public.matches (expires_at);
 
 alter table public.matches enable row level security;
 
-create policy "Users can view their own matches"
+create policy "Users can view their own curated matches"
   on public.matches for select
-  using (auth.uid() = member_a_id or auth.uid() = member_b_id);
+  using (auth.uid() = user_id);
 
--- Messages within a match (Section 2.2 — messaging stays open with
--- all 5 candidates during the week, then narrows to the one match).
+-- ============================================================
+-- interests — up to 2 per (user, batch), enforced in application
+-- code (the matching engine) rather than a DB constraint, since
+-- "up to 2" isn't expressible as a simple unique/check constraint.
+-- ============================================================
+create table if not exists public.interests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  matched_user_id uuid not null references public.profiles(id) on delete cascade,
+  batch_id uuid not null,
+  created_at timestamptz not null default now(),
+
+  unique (user_id, matched_user_id, batch_id)
+);
+
+create index if not exists idx_interests_user_batch on public.interests (user_id, batch_id);
+create index if not exists idx_interests_reverse_lookup on public.interests (matched_user_id, user_id);
+
+alter table public.interests enable row level security;
+
+create policy "Users can view their own expressed interests"
+  on public.interests for select
+  using (auth.uid() = user_id);
+
+create policy "Users can express interest as themselves"
+  on public.interests for insert
+  with check (auth.uid() = user_id);
+
+-- ============================================================
+-- mutual_matches — created when interest is reciprocal.
+-- ============================================================
+create table if not exists public.mutual_matches (
+  id uuid primary key default gen_random_uuid(),
+  user_a_id uuid not null references public.profiles(id) on delete cascade,
+  user_b_id uuid not null references public.profiles(id) on delete cascade,
+  matched_at timestamptz not null default now(),
+  status text not null default 'active', -- 'active' | 'ended'
+  -- Placeholder duration (2 weeks per the build spec) — confirm the
+  -- final cooling-off period before launch.
+  cooling_off_until timestamptz,
+
+  constraint mutual_matches_not_self check (user_a_id <> user_b_id),
+  constraint mutual_matches_ordered_pair check (user_a_id < user_b_id)
+);
+
+create index if not exists idx_mutual_matches_user_a on public.mutual_matches (user_a_id);
+create index if not exists idx_mutual_matches_user_b on public.mutual_matches (user_b_id);
+
+alter table public.mutual_matches enable row level security;
+
+create policy "Users can view their own mutual matches"
+  on public.mutual_matches for select
+  using (auth.uid() = user_a_id or auth.uid() = user_b_id);
+
+create policy "Users can end their own mutual match"
+  on public.mutual_matches for update
+  using (auth.uid() = user_a_id or auth.uid() = user_b_id)
+  with check (auth.uid() = user_a_id or auth.uid() = user_b_id);
+
+create or replace function public.set_cooling_off_on_end()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status = 'ended' and old.status <> 'ended' and new.cooling_off_until is null then
+    new.cooling_off_until := now() + interval '14 days';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_mutual_match_ended on public.mutual_matches;
+create trigger on_mutual_match_ended
+  before update on public.mutual_matches
+  for each row execute function public.set_cooling_off_on_end();
+
+-- ============================================================
+-- messages — only between two users with an active mutual_match.
+-- ============================================================
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
-  match_id uuid references public.matches(id) on delete cascade,
-  sender_id uuid references public.profiles(id) on delete cascade,
-  body text not null,
-  created_at timestamptz default now()
+  sender_id uuid not null references public.profiles(id) on delete cascade,
+  recipient_id uuid not null references public.profiles(id) on delete cascade,
+  mutual_match_id uuid not null references public.mutual_matches(id) on delete cascade,
+  content text not null,
+  created_at timestamptz not null default now(),
+  read_at timestamptz
 );
+
+create index if not exists idx_messages_mutual_match on public.messages (mutual_match_id, created_at);
 
 alter table public.messages enable row level security;
 
-create policy "Users can view messages in their own matches"
+create policy "Participants can view messages in their mutual match"
   on public.messages for select
-  using (
-    exists (
-      select 1 from public.matches
-      where matches.id = messages.match_id
-      and (matches.member_a_id = auth.uid() or matches.member_b_id = auth.uid())
+  using (auth.uid() = sender_id or auth.uid() = recipient_id);
+
+create policy "Participants can send messages while the match is active"
+  on public.messages for insert
+  with check (
+    auth.uid() = sender_id
+    and exists (
+      select 1 from public.mutual_matches mm
+      where mm.id = messages.mutual_match_id
+        and mm.status = 'active'
+        and (mm.user_a_id = auth.uid() or mm.user_b_id = auth.uid())
+        and recipient_id in (mm.user_a_id, mm.user_b_id)
+        and recipient_id <> auth.uid()
     )
   );
 
-create policy "Users can send messages in their own matches"
-  on public.messages for insert
-  with check (auth.uid() = sender_id);
+create policy "Recipients can mark messages read"
+  on public.messages for update
+  using (auth.uid() = recipient_id)
+  with check (auth.uid() = recipient_id);
 
--- Pre-marriage counselling requests (Section 6).
+-- ============================================================
+-- memberships — gates access to curated matches (Phase 5, Stripe
+-- wiring not yet built; rows are written by the service role).
+-- ============================================================
+create table if not exists public.memberships (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  tier text not null check (tier in ('founding', 'regular', 'priority')),
+  started_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  stripe_customer_id text,
+  stripe_subscription_id text
+);
+
+create index if not exists idx_memberships_user on public.memberships (user_id);
+
+alter table public.memberships enable row level security;
+
+create policy "Users can view their own membership"
+  on public.memberships for select
+  using (auth.uid() = user_id);
+
+-- ============================================================
+-- counselling_requests
+-- ============================================================
 create table if not exists public.counselling_requests (
   id uuid primary key default gen_random_uuid(),
-  match_id uuid references public.matches(id) on delete cascade,
-  requested_by uuid references public.profiles(id) on delete cascade,
-  status text default 'requested', -- 'requested', 'scheduled', 'completed'
-  created_at timestamptz default now()
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  requested_at timestamptz not null default now(),
+  counsellor_type text not null check (counsellor_type in ('relationship', 'marriage', 'religious')),
+  status text not null default 'pending' -- 'pending' | 'contacted' | 'closed'
 );
+
+create index if not exists idx_counselling_requests_user on public.counselling_requests (user_id);
 
 alter table public.counselling_requests enable row level security;
 
-create policy "Users can view counselling requests for their own matches"
+create policy "Users can view their own counselling requests"
   on public.counselling_requests for select
-  using (
-    exists (
-      select 1 from public.matches
-      where matches.id = counselling_requests.match_id
-      and (matches.member_a_id = auth.uid() or matches.member_b_id = auth.uid())
-    )
-  );
+  using (auth.uid() = user_id);
 
--- Free wedding photoshoot claims (Section 7).
-create table if not exists public.wedding_perk_claims (
-  id uuid primary key default gen_random_uuid(),
-  match_id uuid references public.matches(id) on delete cascade,
-  claimed_by uuid references public.profiles(id) on delete cascade,
-  status text default 'claimed', -- 'claimed', 'scheduled', 'delivered'
-  created_at timestamptz default now()
-);
-
-alter table public.wedding_perk_claims enable row level security;
-
-create policy "Users can view wedding perk claims for their own matches"
-  on public.wedding_perk_claims for select
-  using (
-    exists (
-      select 1 from public.matches
-      where matches.id = wedding_perk_claims.match_id
-      and (matches.member_a_id = auth.uid() or matches.member_b_id = auth.uid())
-    )
-  );
+create policy "Users can create their own counselling request"
+  on public.counselling_requests for insert
+  with check (auth.uid() = user_id);
