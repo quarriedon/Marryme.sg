@@ -1,33 +1,61 @@
-// Hand-written types mirroring supabase/schema.sql. Regenerate with
-// `supabase gen types typescript` once the project is linked to a
-// real Supabase instance, and delete this file in favour of that.
+// Hand-written types mirroring mysql/schema.sql.
 
 export type Gender = "male" | "female";
-export type ProfileStatus = "pending" | "approved" | "suspended";
+export type UserRole = "member" | "admin";
+export type UserStatus = "pending" | "approved" | "suspended";
 export type MutualMatchStatus = "active" | "ended";
 export type MembershipTier = "founding" | "regular" | "priority";
 export type CounsellorType = "relationship" | "marriage" | "religious";
 export type CounsellingRequestStatus = "pending" | "contacted" | "closed";
 
-export type Profile = {
+// Full row as stored — includes password_hash. Never send this
+// straight to the client; pick only the fields you need (see the
+// Next.js DTO pattern) or use PublicUser below.
+export type UserRow = {
   id: string;
+  email: string | null;
+  phone: string | null;
+  password_hash: string | null;
   full_name: string | null;
   date_of_birth: string | null; // ISO date
   gender: Gender | null;
-  photos: string[];
+  photos: string[] | null;
   bio: string | null;
   location: string | null;
   occupation: string | null;
-  role: "member" | "admin";
-  status: ProfileStatus;
-  faith_matters_to_them: boolean;
+  role: UserRole;
+  status: UserStatus;
+  faith_matters_to_them: 0 | 1;
   own_faith: string | null;
-  open_to_other_faith: boolean | null;
+  open_to_other_faith: 0 | 1 | null;
   years_out_of_relationship: number | null;
   preferred_gender: Gender | null;
   preferred_age_min: number | null;
   preferred_age_max: number | null;
   preferred_location: string | null;
+  created_at: string;
+};
+
+// Same shape, with MySQL's TINYINT booleans normalized to real
+// booleans — this is what the matching engine and app code work
+// with. Use `toProfile()` in src/lib/matching/engine.ts to convert.
+export type Profile = Omit<
+  UserRow,
+  "password_hash" | "faith_matters_to_them" | "open_to_other_faith" | "photos"
+> & {
+  faith_matters_to_them: boolean;
+  open_to_other_faith: boolean | null;
+  photos: string[];
+};
+
+export type PublicUser = Omit<UserRow, "password_hash">;
+
+export type OtpCodeRow = {
+  id: string;
+  phone: string;
+  code_hash: string;
+  expires_at: string;
+  consumed_at: string | null;
   created_at: string;
 };
 

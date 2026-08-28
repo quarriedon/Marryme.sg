@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { auth } from "@/lib/auth";
 import { expressInterest, InterestLimitError } from "@/lib/matching/engine";
 
 /**
@@ -9,9 +8,8 @@ import { expressInterest, InterestLimitError } from "@/lib/matching/engine";
  * (see engine.ts) instead of waiting for the next scheduled run.
  */
 export async function POST(request: NextRequest) {
-  const authedSupabase = await createServerClient();
-  const { data: userData, error: authError } = await authedSupabase.auth.getUser();
-  if (authError || !userData.user) {
+  const session = await auth();
+  if (!session?.user) {
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   }
 
@@ -26,13 +24,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const admin = createAdminClient();
-    const result = await expressInterest(
-      admin,
-      userData.user.id,
-      matchedUserId,
-      batchId
-    );
+    const result = await expressInterest(session.user.id, matchedUserId, batchId);
     return NextResponse.json({
       interest: result.interest,
       mutualMatch: result.mutualMatch,

@@ -1,16 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { auth, signOut } from "@/lib/auth";
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getUser();
-
-  if (!data.user) redirect("/login");
+  const session = await auth();
+  if (!session?.user) redirect("/login");
 
   return (
     <div className="flex-1 flex flex-col">
@@ -34,7 +32,12 @@ export default async function DashboardLayout({
           <Link href="/dashboard/perks" className="hover:text-white">
             Perks
           </Link>
-          <form action="/auth/signout" method="post">
+          <form
+            action={async () => {
+              "use server";
+              await signOut({ redirectTo: "/" });
+            }}
+          >
             <button className="hover:text-white">Sign out</button>
           </form>
         </div>

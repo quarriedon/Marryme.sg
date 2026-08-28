@@ -1,49 +1,29 @@
-import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 
 /**
- * Refreshes the Supabase auth session on every request and
- * redirects unauthenticated users away from protected routes.
+ * Optimistic auth check — reads the session JWT from the cookie only
+ * (no database hit), per the Next.js Proxy guidance. Proxy runs on
+ * the Node.js runtime here (Next.js 16+), so this works whether the
+ * auth library is Edge-compatible or not. Real authorization still
+ * happens close to the data (route handlers, Server Components),
+ * this is just the first line of defense / redirect-based UX.
  */
-export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
+const protectedPaths = ["/dashboard", "/admin"];
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  const { data } = await supabase.auth.getUser();
-
-  const protectedPaths = ["/dashboard", "/admin"];
+export default auth((req) => {
   const isProtected = protectedPaths.some((path) =>
-    request.nextUrl.pathname.startsWith(path)
+    req.nextUrl.pathname.startsWith(path)
   );
 
-  if (isProtected && !data.user) {
-    const redirectUrl = new URL("/login", request.url);
-    redirectUrl.searchParams.set("next", request.nextUrl.pathname);
+  if (isProtected && !req.auth) {
+    const redirectUrl = new URL("/login", req.nextUrl);
+    redirectUrl.searchParams.set("next", req.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
   }
 
-  return response;
-}
+  return NextResponse.next();
+});
 
 export const config = {
   matcher: [

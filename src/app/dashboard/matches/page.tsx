@@ -3,23 +3,21 @@
 // src/lib/matching/engine.ts) — this page only reads the current
 // batch and lets the user express interest in up to 2 of them.
 
+import { redirect } from "next/navigation";
 import { Interlace } from "@/components/Interlace";
 import { MatchBatch } from "@/components/MatchBatch";
 import type { MatchCandidate } from "@/components/MatchCard";
-import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
+import { query } from "@/lib/db";
 
 type CandidateRow = {
   batch_id: string;
-  expires_at: string;
   matched_user_id: string;
-  candidate: {
-    full_name: string | null;
-    date_of_birth: string | null;
-    occupation: string | null;
-    location: string | null;
-    bio: string | null;
-  } | null;
+  full_name: string | null;
+  date_of_birth: string | null;
+  occupation: string | null;
+  location: string | null;
+  bio: string | null;
 };
 
 function ageFromDob(dateOfBirth: string | null): number | null {
@@ -35,17 +33,14 @@ function ageFromDob(dateOfBirth: string | null): number | null {
 }
 
 export default async function MatchesPage() {
-  const supabase = await createClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) redirect("/login");
-  const userId = userData.user.id;
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  const userId = session.user.id;
 
-  const { data: activeMutual } = await supabase
-    .from("mutual_matches")
-    .select("id")
-    .eq("status", "active")
-    .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`)
-    .maybeSingle();
+  const [activeMutual] = await query<{ id: string }>(
+    `SELECT id FROM mutual_matches WHERE status = 'active' AND (user_a_id = ? OR user_b_id = ?) LIMIT 1`,
+    [userId, userId]
+  );
 
   if (activeMutual) {
     return (
@@ -63,36 +58,35 @@ export default async function MatchesPage() {
     );
   }
 
-  const { data: rows } = await supabase
-    .from("matches")
-    .select(
-      "batch_id, expires_at, matched_user_id, candidate:profiles!matches_matched_user_id_fkey(full_name, date_of_birth, occupation, location, bio)"
-    )
-    .eq("user_id", userId)
-    .gt("expires_at", new Date().toISOString())
-    .order("created_at", { ascending: true })
-    .returns<CandidateRow[]>();
+  const rows = await query<CandidateRow>(
+    `SELECT m.batch_id, m.matched_user_id,
+            u.full_name, u.date_of_birth, u.occupation, u.location, u.bio
+     FROM matches m
+     JOIN users u ON u.id = m.matched_user_id
+     WHERE m.user_id = ? AND m.expires_at > NOW()
+     ORDER BY m.created_at ASC`,
+    [userId]
+  );
 
-  const currentBatchId = rows?.[0]?.batch_id ?? null;
-  const batchRows = rows?.filter((r) => r.batch_id === currentBatchId) ?? [];
+  const currentBatchId = rows[0]?.batch_id ?? null;
+  const batchRows = rows.filter((r) => r.batch_id === currentBatchId);
 
   let interestedIds: string[] = [];
   if (currentBatchId) {
-    const { data: interests } = await supabase
-      .from("interests")
-      .select("matched_user_id")
-      .eq("user_id", userId)
-      .eq("batch_id", currentBatchId);
-    interestedIds = (interests ?? []).map((i) => i.matched_user_id);
+    const interests = await query<{ matched_user_id: string }>(
+      `SELECT matched_user_id FROM interests WHERE user_id = ? AND batch_id = ?`,
+      [userId, currentBatchId]
+    );
+    interestedIds = interests.map((i) => i.matched_user_id);
   }
 
   const candidates: MatchCandidate[] = batchRows.map((r) => ({
     matchedUserId: r.matched_user_id,
-    name: r.candidate?.full_name ?? "Someone new",
-    age: ageFromDob(r.candidate?.date_of_birth ?? null),
-    occupation: r.candidate?.occupation ?? null,
-    location: r.candidate?.location ?? null,
-    bio: r.candidate?.bio ?? null,
+    name: r.full_name ?? "Someone new",
+    age: ageFromDob(r.date_of_birth),
+    occupation: r.occupation,
+    location: r.location,
+    bio: r.bio,
   }));
 
   return (

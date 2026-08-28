@@ -6,7 +6,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 type Question = {
   id: string;
@@ -89,23 +88,17 @@ export default function PersonalityTestPage() {
   async function submit(finalAnswers: Record<string, string>) {
     setSubmitting(true);
     setError(null);
-    const supabase = createClient();
-    const { data: userData } = await supabase.auth.getUser();
 
-    if (!userData.user) {
-      setError("Please sign in again to save your answers.");
-      setSubmitting(false);
-      return;
-    }
-
-    const { error } = await supabase.from("personality_responses").upsert({
-      profile_id: userData.user.id,
-      answers: finalAnswers,
+    const res = await fetch("/api/onboarding/personality-test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(finalAnswers),
     });
 
     setSubmitting(false);
-    if (error) {
-      setError(error.message);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? "Please sign in again to save your answers.");
       return;
     }
     router.push("/onboarding/profile");
