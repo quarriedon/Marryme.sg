@@ -1,8 +1,19 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Interest, MatchRow, MutualMatch, Profile } from "@/types/database";
+import { query, queryOne, withTransaction } from "@/lib/db";
+import type { Interest, MatchRow, MutualMatch, Profile, UserRow } from "@/types/database";
 import { BATCH_SIZE, MAX_INTERESTS_PER_BATCH, BATCH_DURATION_DAYS } from "@/lib/matching/constants";
 
 export { BATCH_SIZE, MAX_INTERESTS_PER_BATCH, BATCH_DURATION_DAYS };
+
+/** MySQL returns TINYINT booleans as 0/1 and JSON columns pre-parsed — normalize to the shape the engine works with. */
+function toProfile(row: UserRow): Profile {
+  return {
+    ...row,
+    faith_matters_to_them: Boolean(row.faith_matters_to_them),
+    open_to_other_faith:
+      row.open_to_other_faith === null ? null : Boolean(row.open_to_other_faith),
+    photos: row.photos ?? [],
+  };
+}
 
 function ageFromDob(dateOfBirth: string, on: Date = new Date()): number {
   const dob = new Date(dateOfBirth);
@@ -64,41 +75,33 @@ export function isEligibleCandidatePair(a: Profile, b: Profile): boolean {
   return isFaithCompatible(a, b) && isPreferenceCompatible(a, b);
 }
 
-async function hasActiveMutualMatch(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<boolean> {
-  const { count } = await supabase
-    .from("mutual_matches")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "active")
-    .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`);
-  return Boolean(count && count > 0);
+async function hasActiveMutualMatch(userId: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM mutual_matches
+     WHERE status = 'active' AND (user_a_id = ? OR user_b_id = ?)
+     LIMIT 1`,
+    [userId, userId]
+  );
+  return row !== null;
 }
 
-async function isInCoolingOff(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<boolean> {
-  const { count } = await supabase
-    .from("mutual_matches")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "ended")
-    .gt("cooling_off_until", new Date().toISOString())
-    .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`);
-  return Boolean(count && count > 0);
+async function isInCoolingOff(userId: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM mutual_matches
+     WHERE status = 'ended' AND cooling_off_until > NOW()
+       AND (user_a_id = ? OR user_b_id = ?)
+     LIMIT 1`,
+    [userId, userId]
+  );
+  return row !== null;
 }
 
-async function hasUnexpiredBatch(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<boolean> {
-  const { count } = await supabase
-    .from("matches")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .gt("expires_at", new Date().toISOString());
-  return Boolean(count && count > 0);
+async function hasUnexpiredBatch(userId: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM matches WHERE user_id = ? AND expires_at > NOW() LIMIT 1`,
+    [userId]
+  );
+  return row !== null;
 }
 
 /**
@@ -109,17 +112,14 @@ async function hasUnexpiredBatch(
  * expired batch simply no longer counts as "unexpired" on the next
  * scheduled run.
  */
-async function isEligibleForNewBatch(
-  supabase: SupabaseClient,
-  profile: Profile
-): Promise<boolean> {
+async function isEligibleForNewBatch(profile: Profile): Promise<boolean> {
   if (profile.status !== "approved") return false;
   if (!profile.gender || !profile.date_of_birth) return false; // onboarding incomplete
 
   const [activeMatch, coolingOff, unexpiredBatch] = await Promise.all([
-    hasActiveMutualMatch(supabase, profile.id),
-    isInCoolingOff(supabase, profile.id),
-    hasUnexpiredBatch(supabase, profile.id),
+    hasActiveMutualMatch(profile.id),
+    isInCoolingOff(profile.id),
+    hasUnexpiredBatch(profile.id),
   ]);
 
   return !activeMatch && !coolingOff && !unexpiredBatch;
@@ -140,49 +140,34 @@ function shuffle<T>(items: T[]): T[] {
  * mutual match themselves (they're unavailable), excluding anyone
  * this user has an existing (any-status) mutual match history with.
  */
-async function candidatesFor(
-  supabase: SupabaseClient,
-  user: Profile,
-  approvedPool: Profile[]
-): Promise<Profile[]> {
-  const { data: pastMatches } = await supabase
-    .from("mutual_matches")
-    .select("user_a_id, user_b_id")
-    .or(`user_a_id.eq.${user.id},user_b_id.eq.${user.id}`);
+async function candidatesFor(user: Profile, approvedPool: Profile[]): Promise<Profile[]> {
+  const pastMatches = await query<{ user_a_id: string; user_b_id: string }>(
+    `SELECT user_a_id, user_b_id FROM mutual_matches WHERE user_a_id = ? OR user_b_id = ?`,
+    [user.id, user.id]
+  );
 
   const pastPartnerIds = new Set(
-    (pastMatches ?? []).map((m: { user_a_id: string; user_b_id: string }) =>
-      m.user_a_id === user.id ? m.user_b_id : m.user_a_id
-    )
+    pastMatches.map((m) => (m.user_a_id === user.id ? m.user_b_id : m.user_a_id))
   );
 
-  const candidateIds = approvedPool
+  const candidates = approvedPool
     .filter((c) => c.id !== user.id)
     .filter((c) => !pastPartnerIds.has(c.id))
-    .filter((c) => isEligibleCandidatePair(user, c))
-    .map((c) => c.id);
+    .filter((c) => isEligibleCandidatePair(user, c));
 
-  if (candidateIds.length === 0) return [];
+  if (candidates.length === 0) return [];
 
   // Exclude anyone currently in an active mutual match (unavailable).
-  const { data: takenRows } = await supabase
-    .from("mutual_matches")
-    .select("user_a_id, user_b_id")
-    .eq("status", "active")
-    .or(
-      `user_a_id.in.(${candidateIds.join(",")}),user_b_id.in.(${candidateIds.join(",")})`
-    );
-
-  const takenIds = new Set(
-    (takenRows ?? []).flatMap((m: { user_a_id: string; user_b_id: string }) => [
-      m.user_a_id,
-      m.user_b_id,
-    ])
+  const candidateIds = candidates.map((c) => c.id);
+  const placeholders = candidateIds.map(() => "?").join(",");
+  const takenRows = await query<{ user_a_id: string; user_b_id: string }>(
+    `SELECT user_a_id, user_b_id FROM mutual_matches
+     WHERE status = 'active' AND (user_a_id IN (${placeholders}) OR user_b_id IN (${placeholders}))`,
+    [...candidateIds, ...candidateIds]
   );
+  const takenIds = new Set(takenRows.flatMap((m) => [m.user_a_id, m.user_b_id]));
 
-  return approvedPool.filter(
-    (c) => candidateIds.includes(c.id) && !takenIds.has(c.id)
-  );
+  return candidates.filter((c) => !takenIds.has(c.id));
 }
 
 /**
@@ -192,32 +177,23 @@ async function candidatesFor(
  * candidates available).
  */
 export async function generateBatchForUser(
-  supabase: SupabaseClient,
   user: Profile,
   approvedPool: Profile[]
 ): Promise<string | null> {
-  if (!(await isEligibleForNewBatch(supabase, user))) return null;
+  if (!(await isEligibleForNewBatch(user))) return null;
 
-  const candidates = shuffle(await candidatesFor(supabase, user, approvedPool)).slice(
-    0,
-    BATCH_SIZE
-  );
+  const candidates = shuffle(await candidatesFor(user, approvedPool)).slice(0, BATCH_SIZE);
   if (candidates.length === 0) return null;
 
   const batchId = crypto.randomUUID();
-  const expiresAt = new Date(
-    Date.now() + BATCH_DURATION_DAYS * 24 * 60 * 60 * 1000
-  ).toISOString();
+  const expiresAt = new Date(Date.now() + BATCH_DURATION_DAYS * 24 * 60 * 60 * 1000);
 
-  const { error } = await supabase.from("matches").insert(
-    candidates.map((c) => ({
-      user_id: user.id,
-      matched_user_id: c.id,
-      batch_id: batchId,
-      expires_at: expiresAt,
-    }))
+  const values = candidates.map((c) => [crypto.randomUUID(), user.id, c.id, batchId, expiresAt]);
+  const placeholders = values.map(() => "(?, ?, ?, ?, ?)").join(", ");
+  await query(
+    `INSERT INTO matches (id, user_id, matched_user_id, batch_id, expires_at) VALUES ${placeholders}`,
+    values.flat()
   );
-  if (error) throw error;
 
   return batchId;
 }
@@ -228,21 +204,16 @@ export async function generateBatchForUser(
  * currently have a live batch — new signups, batches that expired
  * with no mutual match, and users whose cooling-off just ended.
  */
-export async function runScheduledMatching(supabase: SupabaseClient): Promise<{
+export async function runScheduledMatching(): Promise<{
   usersProcessed: number;
   batchesGenerated: number;
 }> {
-  const { data: approvedPool, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("status", "approved");
-  if (error) throw error;
-
-  const pool = (approvedPool ?? []) as Profile[];
+  const rows = await query<UserRow>(`SELECT * FROM users WHERE status = 'approved'`);
+  const pool = rows.map(toProfile);
   let batchesGenerated = 0;
 
   for (const user of pool) {
-    const batchId = await generateBatchForUser(supabase, user, pool);
+    const batchId = await generateBatchForUser(user, pool);
     if (batchId) batchesGenerated += 1;
   }
 
@@ -251,7 +222,9 @@ export async function runScheduledMatching(supabase: SupabaseClient): Promise<{
 
 export class InterestLimitError extends Error {
   constructor() {
-    super(`You can only express interest in up to ${MAX_INTERESTS_PER_BATCH} matches per batch.`);
+    super(
+      `You can only express interest in up to ${MAX_INTERESTS_PER_BATCH} matches per batch.`
+    );
     this.name = "InterestLimitError";
   }
 }
@@ -263,56 +236,50 @@ export class InterestLimitError extends Error {
  * waiting for the next scheduled run.
  */
 export async function expressInterest(
-  supabase: SupabaseClient,
   userId: string,
   matchedUserId: string,
   batchId: string
 ): Promise<{ interest: Interest; mutualMatch: MutualMatch | null }> {
-  const { data: matchRow, error: matchError } = await supabase
-    .from("matches")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("batch_id", batchId)
-    .eq("matched_user_id", matchedUserId)
-    .gt("expires_at", new Date().toISOString())
-    .maybeSingle();
-  if (matchError) throw matchError;
+  const matchRow = await queryOne<MatchRow>(
+    `SELECT * FROM matches
+     WHERE user_id = ? AND batch_id = ? AND matched_user_id = ? AND expires_at > NOW()
+     LIMIT 1`,
+    [userId, batchId, matchedUserId]
+  );
   if (!matchRow) {
     throw new Error("This match is no longer available.");
   }
 
-  const { count: existingInterests, error: countError } = await supabase
-    .from("interests")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .eq("batch_id", batchId);
-  if (countError) throw countError;
+  const alreadyExpressed = await queryOne<Interest>(
+    `SELECT * FROM interests WHERE user_id = ? AND batch_id = ? AND matched_user_id = ? LIMIT 1`,
+    [userId, batchId, matchedUserId]
+  );
 
-  const alreadyExpressed = await supabase
-    .from("interests")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("batch_id", batchId)
-    .eq("matched_user_id", matchedUserId)
-    .maybeSingle();
+  if (!alreadyExpressed) {
+    const existingCount = await query<{ id: string }>(
+      `SELECT id FROM interests WHERE user_id = ? AND batch_id = ?`,
+      [userId, batchId]
+    );
+    if (existingCount.length >= MAX_INTERESTS_PER_BATCH) {
+      throw new InterestLimitError();
+    }
 
-  if (!alreadyExpressed.data && (existingInterests ?? 0) >= MAX_INTERESTS_PER_BATCH) {
-    throw new InterestLimitError();
+    const id = crypto.randomUUID();
+    await query(
+      `INSERT INTO interests (id, user_id, matched_user_id, batch_id) VALUES (?, ?, ?, ?)`,
+      [id, userId, matchedUserId, batchId]
+    );
   }
 
-  const { data: interest, error: insertError } = await supabase
-    .from("interests")
-    .upsert(
-      { user_id: userId, matched_user_id: matchedUserId, batch_id: batchId },
-      { onConflict: "user_id,matched_user_id,batch_id" }
-    )
-    .select()
-    .single();
-  if (insertError) throw insertError;
+  const interest = await queryOne<Interest>(
+    `SELECT * FROM interests WHERE user_id = ? AND batch_id = ? AND matched_user_id = ? LIMIT 1`,
+    [userId, batchId, matchedUserId]
+  );
+  if (!interest) throw new Error("Failed to record interest.");
 
-  const mutualMatch = await checkForMutualMatch(supabase, userId, matchedUserId);
+  const mutualMatch = await checkForMutualMatch(userId, matchedUserId);
 
-  return { interest: interest as Interest, mutualMatch };
+  return { interest, mutualMatch };
 }
 
 /**
@@ -320,38 +287,39 @@ export async function expressInterest(
  * any of their own batches), the interest is mutual — create the
  * mutual_match and unlock chat. Rule 5 (one active match at a time)
  * is enforced by refusing to create a second active mutual match for
- * either party.
+ * either party. Runs inside a transaction with locking reads to keep
+ * the check-then-insert as safe as MySQL reasonably allows here.
  */
 export async function checkForMutualMatch(
-  supabase: SupabaseClient,
   userId: string,
   otherUserId: string
 ): Promise<MutualMatch | null> {
-  const { data: reciprocal, error } = await supabase
-    .from("interests")
-    .select("id")
-    .eq("user_id", otherUserId)
-    .eq("matched_user_id", userId)
-    .maybeSingle();
-  if (error) throw error;
+  const reciprocal = await queryOne<Interest>(
+    `SELECT id FROM interests WHERE user_id = ? AND matched_user_id = ? LIMIT 1`,
+    [otherUserId, userId]
+  );
   if (!reciprocal) return null;
-
-  const [userTaken, otherTaken] = await Promise.all([
-    hasActiveMutualMatch(supabase, userId),
-    hasActiveMutualMatch(supabase, otherUserId),
-  ]);
-  if (userTaken || otherTaken) return null;
 
   const [userAId, userBId] = [userId, otherUserId].sort();
 
-  const { data: mutualMatch, error: insertError } = await supabase
-    .from("mutual_matches")
-    .insert({ user_a_id: userAId, user_b_id: userBId, status: "active" })
-    .select()
-    .single();
-  if (insertError) throw insertError;
+  return withTransaction(async (conn) => {
+    const [existingActiveRows] = await conn.query(
+      `SELECT id FROM mutual_matches
+       WHERE status = 'active' AND (user_a_id IN (?, ?) OR user_b_id IN (?, ?))
+       FOR UPDATE`,
+      [userId, otherUserId, userId, otherUserId]
+    );
+    if ((existingActiveRows as unknown[]).length > 0) return null;
 
-  return mutualMatch as MutualMatch;
+    const id = crypto.randomUUID();
+    await conn.query(
+      `INSERT INTO mutual_matches (id, user_a_id, user_b_id, status) VALUES (?, ?, ?, 'active')`,
+      [id, userAId, userBId]
+    );
+
+    const [rows] = await conn.query(`SELECT * FROM mutual_matches WHERE id = ?`, [id]);
+    return (rows as MutualMatch[])[0] ?? null;
+  });
 }
 
 export type { MatchRow };

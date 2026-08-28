@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { runScheduledMatching } from "@/lib/matching/engine";
 
 /**
@@ -28,8 +27,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const supabase = createAdminClient();
-    const result = await runScheduledMatching(supabase);
+    const result = await runScheduledMatching();
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     console.error("process-matches failed", err);

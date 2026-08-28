@@ -6,23 +6,30 @@ Positioning: dating with real intent, for Singapore's multicultural
 communities, with curated (not swipe-feed) matches.
 
 ## Stack
-- Next.js 15 (App Router) + TypeScript + Tailwind CSS v4
-- Supabase — auth (email/password + phone OTP now, Singpass later), Postgres, storage
+- Next.js 16 (App Router) + TypeScript + Tailwind CSS v4
+- MySQL (hosted on Plesk) for the database, accessed via `mysql2`
+- NextAuth.js (Auth.js v5) for auth — email/password + phone OTP now, Singpass later
 - Hosting: Plesk (Node.js app)
 
 ## Local setup
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in your Supabase keys
+cp .env.example .env.local   # then fill in your MySQL + NextAuth values
 npm run dev
 ```
 
-## Supabase setup
-1. Create a project at supabase.com (Singapore region if offered, for latency).
-2. Settings → API: copy the Project URL, anon key, and **service role key** into `.env.local`. The service role key powers the matching engine (`src/lib/matching/engine.ts`) — it needs to read and write across every user's rows to build batches and detect mutual interest, which row-level security alone can't do from the browser.
-3. SQL Editor: run `supabase/schema.sql` to create `profiles`, `matches`, `interests`, `mutual_matches`, `messages`, `memberships`, and `counselling_requests`, all with row-level security.
-4. Authentication → Providers: enable **Email** and **Phone** (you'll need an SMS provider — Twilio is the most common; add your Twilio credentials under Auth → Phone).
+## MySQL setup
+1. In Plesk: Databases → create a MySQL database and a user with full privileges on it. Note the host, port, username, password, and database name.
+2. Put those into `.env.local` as `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` — never commit real values, `.env.local` is gitignored.
+3. Run `mysql/schema.sql` against that database (via Plesk's phpMyAdmin, or `mysql -h HOST -u USER -p DATABASE < mysql/schema.sql`) to create `users`, `otp_codes`, `matches`, `interests`, `mutual_matches`, `messages`, `memberships`, and `counselling_requests`. Requires MySQL 8.0.16+ or MariaDB 10.2+ (for `DEFAULT (UUID())` and `CHECK` constraint support) — check with your host if unsure.
+4. There's no row-level security in MySQL — every access rule that used to live in a Supabase RLS policy is now enforced in application code (route handlers under `src/app/api/`, and `src/lib/auth.ts` / `src/lib/matching/engine.ts`). Never query these tables directly from a Client Component.
+
+## Auth setup
+- Generate a secret: `npx auth secret`, put it in `.env.local` as `AUTH_SECRET`.
+- Set `AUTH_URL` to your real domain once you have one (see `.env.example`).
+- Email/password and phone-OTP sign-in are both custom `Credentials` providers in `src/lib/auth.ts`, verifying against the `users` table directly — there's no third-party auth service anymore.
+- Phone OTP has no SMS provider wired up yet: `POST /api/auth/send-otp` currently just logs the code to the server console. Wire it to Twilio (or similar) before launch.
 
 ## The matching mechanic
 
@@ -69,20 +76,21 @@ Faith is a hard filter, not just a preference: if faith matters to a user, they'
 
 4. **Pull the repo onto the server** — either use Plesk's Git extension (Websites & Domains → Git → point it at your GitHub repo, set the deploy path) or clone manually over SSH.
 
-5. **Set environment variables** in Plesk: Node.js panel → "Custom environment variables" → add the three from `.env.example` with your real Supabase values.
+5. **Set environment variables** in Plesk: Node.js panel → "Custom environment variables" → add everything from `.env.example` with your real MySQL and Auth values.
 
 6. In the Plesk Node.js panel, click **NPM Install**, then **Run Build** (`npm run build`), then **Restart App**.
 
 7. Point your domain's DNS at the Plesk server if it isn't already, and enable SSL (Let's Encrypt, free, one click in Plesk).
 
 ## What's stubbed vs. real in this MVP
-- **Real:** email/password signup+login, phone OTP signup+login, protected `/dashboard` and `/admin` routes, full Supabase schema with row-level security, the matching engine (batch generation, faith filtering, mutual-interest detection, cooling-off), the onboarding profile/preferences form.
-- **Stubbed:** messages page (schema and RLS are in place — no send/receive UI or Realtime wiring yet), admin page (no real moderation queue yet), profile photo field is a plain URL input rather than a Supabase Storage upload. Newly onboarded profiles are auto-approved (no manual review queue yet), and there's no gate yet on `/dashboard/matches` requiring an active membership.
+- **Real:** email/password signup+login and phone OTP signup+login (via NextAuth Credentials providers against MySQL), protected `/dashboard` and `/admin` routes (via `proxy.ts` + role checks), the full MySQL schema, the matching engine (batch generation, faith filtering, mutual-interest detection, cooling-off), the onboarding profile/preferences form.
+- **Stubbed:** messages page (schema is in place — no send/receive UI or real-time wiring yet), admin page (no real moderation queue yet), profile photo field is a plain URL input rather than a real upload, phone OTP codes are logged to the server console instead of sent via SMS. Newly onboarded profiles are auto-approved (no manual review queue yet), and there's no gate yet on `/dashboard/matches` requiring an active membership.
 - **Deferred to post-MVP:** Singpass login (button is present but disabled — requires relying-party registration with the Singpass developer portal, which takes a few days to get approved), Stripe billing for any paid tier.
 
 ## Next steps, roughly in order
-1. Wire messaging with Supabase Realtime, gated on an active `mutual_match`.
-2. Add Stripe Checkout for `memberships`, and gate `/dashboard/matches` behind an active membership.
-3. Build out the admin dashboard: profile approval queue, match batch review/override, counselling request queue, stats.
-4. Photo upload to Supabase Storage instead of a raw URL field.
-5. Apply for Singpass relying-party access, swap in the real login button.
+1. Wire messaging with real-time updates (polling or a small WebSocket/SSE layer, since Supabase Realtime is gone), gated on an active `mutual_match`.
+2. Wire `POST /api/auth/send-otp` to a real SMS provider (Twilio or similar) instead of console-logging the code.
+3. Add Stripe Checkout for `memberships`, and gate `/dashboard/matches` behind an active membership.
+4. Build out the admin dashboard: profile approval queue, match batch review/override, counselling request queue, stats.
+5. Photo upload to object storage instead of a raw URL field.
+6. Apply for Singpass relying-party access, swap in the real login button.

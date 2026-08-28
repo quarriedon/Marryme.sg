@@ -7,7 +7,6 @@
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 export default function ProfileOnboardingPage() {
   const [fullName, setFullName] = useState("");
@@ -37,42 +36,35 @@ export default function ProfileOnboardingPage() {
     setSubmitting(true);
     setError(null);
 
-    const supabase = createClient();
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
-      setError("Please sign in again to save your profile.");
-      setSubmitting(false);
-      return;
-    }
-
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        full_name: fullName,
-        date_of_birth: dob,
+    const res = await fetch("/api/onboarding/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fullName,
+        dateOfBirth: dob,
         gender: gender || null,
         location,
         occupation,
         bio,
-        photos: photoUrl ? [photoUrl] : [],
-        years_out_of_relationship: yearsOutOfRelationship
+        photoUrl,
+        yearsOutOfRelationship: yearsOutOfRelationship
           ? Number(yearsOutOfRelationship)
           : null,
-        faith_matters_to_them: faithMatters === "yes",
-        own_faith: faithMatters === "yes" ? ownFaith || null : null,
-        open_to_other_faith:
+        faithMattersToThem: faithMatters === "yes",
+        ownFaith: faithMatters === "yes" ? ownFaith || null : null,
+        openToOtherFaith:
           faithMatters === "yes" ? openToOtherFaith === "yes" : null,
-        preferred_gender: preferredGender || null,
-        preferred_age_min: preferredAgeMin ? Number(preferredAgeMin) : null,
-        preferred_age_max: preferredAgeMax ? Number(preferredAgeMax) : null,
-        preferred_location: preferredLocation || null,
-        status: "approved",
-      })
-      .eq("id", userData.user.id);
+        preferredGender: preferredGender || null,
+        preferredAgeMin: preferredAgeMin ? Number(preferredAgeMin) : null,
+        preferredAgeMax: preferredAgeMax ? Number(preferredAgeMax) : null,
+        preferredLocation: preferredLocation || null,
+      }),
+    });
 
     setSubmitting(false);
-    if (error) {
-      setError(error.message);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? "Please sign in again to save your profile.");
       return;
     }
     router.push("/dashboard/matches");

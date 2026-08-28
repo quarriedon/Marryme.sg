@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, IBM_Plex_Sans } from "next/font/google";
+import { SessionProvider } from "next-auth/react";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -32,7 +33,7 @@ export default function RootLayout({
       className={`${fraunces.variable} ${plex.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-ink text-[var(--text-on-ink)]">
-        {children}
+        <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
   );

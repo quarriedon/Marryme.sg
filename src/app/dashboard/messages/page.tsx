@@ -1,5 +1,6 @@
-// Messaging stub. Wire to a Supabase `messages` table with
-// Realtime subscriptions once matches can actually connect.
+// Messaging stub. Wire to the MySQL `messages` table (see
+// mysql/schema.sql) once matches can actually connect — polling or a
+// small WebSocket/SSE layer instead of Supabase Realtime.
 
 export default function MessagesPage() {
   return (

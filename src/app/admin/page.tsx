@@ -1,8 +1,14 @@
 // Minimal admin stub for moderating new sign-ups.
-// Restrict properly via a `role` column + RLS policy before launch —
-// this page currently only checks that a user is signed in.
+// Restricted to users with role = 'admin' — see mysql/schema.sql.
 
-export default function AdminPage() {
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
+
+export default async function AdminPage() {
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  if (session.user.role !== "admin") redirect("/dashboard/matches");
+
   return (
     <main className="px-6 py-10 max-w-3xl mx-auto">
       <h1 className="font-display text-3xl mb-1">Admin</h1>

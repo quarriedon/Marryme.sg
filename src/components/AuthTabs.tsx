@@ -2,7 +2,7 @@
 
 import { useState, FormEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { signIn } from "next-auth/react";
 
 type Mode = "email" | "phone";
 type Intent = "signup" | "login";
@@ -19,42 +19,58 @@ export function AuthTabs({ intent }: { intent: Intent }) {
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const router = useRouter();
 
   async function handleEmailSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const supabase = createClient();
-
-    const { error } =
-      intent === "signup"
-        ? await supabase.auth.signUp({ email, password })
-        : await supabase.auth.signInWithPassword({ email, password });
-
-    setLoading(false);
-    if (error) {
-      setError(error.message);
-      return;
-    }
 
     if (intent === "signup") {
-      setNotice("Check your email to confirm your account.");
-    } else {
-      router.push("/dashboard/matches");
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setLoading(false);
+        setError(body.error ?? "Could not create your account.");
+        return;
+      }
     }
+
+    const result = await signIn("credentials", {
+      email,
+      password,
+      redirect: false,
+    });
+
+    setLoading(false);
+    if (result?.error) {
+      setError("Incorrect email or password.");
+      return;
+    }
+    router.push(
+      intent === "signup" ? "/onboarding/personality-test" : "/dashboard/matches"
+    );
   }
 
   async function handleSendOtp(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({ phone });
+
+    const res = await fetch("/api/auth/send-otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone }),
+    });
+
     setLoading(false);
-    if (error) {
-      setError(error.message);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? "Could not send a code — please try again.");
       return;
     }
     setOtpSent(true);
@@ -64,15 +80,16 @@ export function AuthTabs({ intent }: { intent: Intent }) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.verifyOtp({
+
+    const result = await signIn("phone-otp", {
       phone,
-      token: otp,
-      type: "sms",
+      code: otp,
+      redirect: false,
     });
+
     setLoading(false);
-    if (error) {
-      setError(error.message);
+    if (result?.error) {
+      setError("That code didn't work — check it and try again.");
       return;
     }
     router.push(intent === "signup" ? "/onboarding/personality-test" : "/dashboard/matches");
@@ -159,9 +176,6 @@ export function AuthTabs({ intent }: { intent: Intent }) {
 
       {error && (
         <p className="font-sans text-sm text-[var(--maroon)] mt-3">{error}</p>
-      )}
-      {notice && (
-        <p className="font-sans text-sm text-[var(--jade)] mt-3">{notice}</p>
       )}
     </div>
   );
