@@ -48,39 +48,34 @@ Faith is a hard filter, not just a preference: if faith matters to a user, they'
 
 ## Deploying on Plesk (Node.js)
 
-1. **Push to GitHub** first:
+This uses Next's [`output: "standalone"`](https://nextjs.org/docs/app/api-reference/config/next-config-js/output) build (set in `next.config.ts`), which traces only the files the server actually needs and outputs a self-contained app at `.next/standalone/` — including its own minimal `server.js`. There's no hand-written custom server in this repo anymore; Plesk runs the one Next generates.
+
+1. **Push to GitHub** first (if you haven't already):
    ```bash
-   git init
    git add .
-   git commit -m "MarryMe.sg MVP"
-   git remote add origin <your-repo-url>
-   git push -u origin main
+   git commit -m "Deploy setup"
+   git push
    ```
 
 2. **In Plesk:**
    - Go to your domain → **Node.js**.
    - Set "Application Root" to the folder you'll deploy into (e.g. `marryme.sg`).
-   - Set "Application Startup File" to `server.js` (see step 3 — Next.js needs a small custom server on Plesk, since Plesk expects a single entry file rather than `next start`).
+   - Set "Application Startup File" to `.next/standalone/server.js` (not a root-level `server.js` — Next generates this one itself on build).
    - Under "Application Mode" choose `production`.
 
-3. **Add a `server.js`** (already included in this project) so Plesk's Node.js manager has a single file to launch:
-   ```js
-   const { createServer } = require("http");
-   const next = require("next");
-   const app = next({ dev: false });
-   const handle = app.getRequestHandler();
-   app.prepare().then(() => {
-     createServer((req, res) => handle(req, res)).listen(process.env.PORT || 3000);
-   });
-   ```
+3. **Pull the repo onto the server** — either use Plesk's Git extension (Websites & Domains → Git → point it at your GitHub repo, set the deploy path) or clone manually over SSH.
 
-4. **Pull the repo onto the server** — either use Plesk's Git extension (Websites & Domains → Git → point it at your GitHub repo, set the deploy path) or clone manually over SSH.
+4. **Set environment variables** in Plesk: Node.js panel → "Custom environment variables" → add everything from `.env.example` with your real MySQL and Auth values.
 
-5. **Set environment variables** in Plesk: Node.js panel → "Custom environment variables" → add everything from `.env.example` with your real MySQL and Auth values.
-
-6. In the Plesk Node.js panel, click **NPM Install**, then **Run Build** (`npm run build`), then **Restart App**.
-
+5. In the Plesk Node.js panel, click **NPM Install**, then **Run Build** (`npm run build`).
+   - This automatically runs the `postbuild` script (`scripts/copy-standalone-assets.mjs`) afterward, which copies `public/` and `.next/static/` into `.next/standalone/` — **required** for the standalone server to find any CSS, JS, or images at all. Next's standalone output does not include these by default (see the comment in `next.config.ts`); skipping this step is what makes a page come back as unstyled plain HTML with a dead, unhydrated UI (forms that don't respond to submit, buttons that don't do anything — the JS chunks are 404ing too, not just the CSS).
+   - If you ever copy these manually instead of relying on `npm run build`, redo it after **every** build — the whole point of the `postbuild` script is to stop this from being a manual, error-prone step.
+6. **Restart App** in the Plesk Node.js panel.
 7. Point your domain's DNS at the Plesk server if it isn't already, and enable SSL (Let's Encrypt, free, one click in Plesk).
+
+**Low-memory VPS note:** `next.config.ts` sets `experimental.cpus: 1` and `experimental.workerThreads: false` to force a single build worker — Turbopack's default parallelism (roughly one worker per CPU core) is what was OOM-killing builds on this box before. If builds still OOM, check the actual memory limit Plesk enforces on the Node.js application (separate from the VPS's total RAM) and raise it if possible; a single-worker build still needs a reasonable minimum (roughly 1–1.5GB free) to complete.
+
+**Reverse proxy note:** Plesk's Node.js hosting sits behind its own reverse proxy (nginx/Apache) in front of the Node app. NextAuth needs to see the real public host and protocol to set cookies and validate sign-in correctly — `trustHost: true` is set in `src/lib/auth.ts` for this, and `AUTH_URL` should be set to your real `https://` domain in the environment variables. If login ever silently does nothing again (no error, no redirect) after this is all working, check that the proxy is forwarding `X-Forwarded-Host` / `X-Forwarded-Proto` correctly — a mismatch there is the next most likely cause after a static-asset problem.
 
 ## What's stubbed vs. real in this MVP
 - **Real:** email/password signup+login and phone OTP signup+login (via NextAuth Credentials providers against MySQL), protected `/dashboard` and `/admin` routes (via `proxy.ts` + role checks), the full MySQL schema, the matching engine (batch generation, faith filtering, mutual-interest detection, cooling-off), the onboarding profile/preferences form.

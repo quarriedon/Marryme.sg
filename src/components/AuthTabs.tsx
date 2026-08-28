@@ -26,34 +26,38 @@ export function AuthTabs({ intent }: { intent: Intent }) {
     setLoading(true);
     setError(null);
 
-    if (intent === "signup") {
-      const res = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+    try {
+      if (intent === "signup") {
+        const res = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          setError(body.error ?? "Could not create your account.");
+          return;
+        }
+      }
+
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
       });
-      const body = await res.json();
-      if (!res.ok) {
-        setLoading(false);
-        setError(body.error ?? "Could not create your account.");
+
+      if (result?.error) {
+        setError("Incorrect email or password.");
         return;
       }
+      router.push(
+        intent === "signup" ? "/onboarding/personality-test" : "/dashboard/matches"
+      );
+    } catch {
+      setError("Something went wrong — please check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
-
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
-
-    setLoading(false);
-    if (result?.error) {
-      setError("Incorrect email or password.");
-      return;
-    }
-    router.push(
-      intent === "signup" ? "/onboarding/personality-test" : "/dashboard/matches"
-    );
   }
 
   async function handleSendOtp(e: FormEvent) {
@@ -61,19 +65,24 @@ export function AuthTabs({ intent }: { intent: Intent }) {
     setLoading(true);
     setError(null);
 
-    const res = await fetch("/api/auth/send-otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone }),
-    });
+    try {
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
 
-    setLoading(false);
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      setError(body?.error ?? "Could not send a code — please try again.");
-      return;
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.error ?? "Could not send a code — please try again.");
+        return;
+      }
+      setOtpSent(true);
+    } catch {
+      setError("Something went wrong — please check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
-    setOtpSent(true);
   }
 
   async function handleVerifyOtp(e: FormEvent) {
@@ -81,18 +90,25 @@ export function AuthTabs({ intent }: { intent: Intent }) {
     setLoading(true);
     setError(null);
 
-    const result = await signIn("phone-otp", {
-      phone,
-      code: otp,
-      redirect: false,
-    });
+    try {
+      const result = await signIn("phone-otp", {
+        phone,
+        code: otp,
+        redirect: false,
+      });
 
-    setLoading(false);
-    if (result?.error) {
-      setError("That code didn't work — check it and try again.");
-      return;
+      if (result?.error) {
+        setError("That code didn't work — check it and try again.");
+        return;
+      }
+      router.push(
+        intent === "signup" ? "/onboarding/personality-test" : "/dashboard/matches"
+      );
+    } catch {
+      setError("Something went wrong — please check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
-    router.push(intent === "signup" ? "/onboarding/personality-test" : "/dashboard/matches");
   }
 
   return (
