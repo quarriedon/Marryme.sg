@@ -1,9 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  /* Ink — deep charcoal-navy, the app's base */
-  --ink: #14181f;
-  --ink-soft: #1d232c;
+  /* Ink — polished obsidian, the app's base. Near-black rather than
+     charcoal so the gloss/highlight layers below have room to read
+     as reflections rather than just "dark grey". */
+  --ink: #0a0a0d;
+  --ink-soft: #16161d;
 
   /* Paper — warm ivory, used for cards, not full backgrounds */
   --paper: #f6f1e7;
@@ -37,9 +39,30 @@
 }
 
 body {
-  background: var(--ink);
+  background-color: var(--ink);
+  /* Glossy-black "lacquer" effect: a soft highlight top-left (as if
+     lit from one side), a faint warm sheen on a diagonal, and a
+     darker vignette pulling the edges back down — all static
+     gradients, no images, no animation, so it costs nothing to
+     paint. Layered light-to-dark so it reads as a reflective surface
+     rather than a flat fill. */
+  background-image:
+    radial-gradient(ellipse 70% 45% at 18% -8%, rgba(255, 255, 255, 0.09), transparent 60%),
+    radial-gradient(ellipse 55% 40% at 92% 4%, rgba(227, 200, 135, 0.06), transparent 65%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 28%, transparent 72%, rgba(255, 255, 255, 0.03) 100%),
+    radial-gradient(ellipse 90% 55% at 50% 115%, rgba(0, 0, 0, 0.65), transparent 60%),
+    linear-gradient(180deg, #0c0c10 0%, #0a0a0d 45%, #060608 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
   color: var(--text-on-ink);
   font-family: var(--font-plex), Arial, sans-serif;
+}
+
+/* Subtle warm glow for headings set directly on the obsidian
+   background (not on paper cards, which already have plenty of
+   contrast) — gold catching low light, not a neon effect. */
+.gilded-heading {
+  text-shadow: 0 0 28px rgba(227, 200, 135, 0.22);
 }
 
 /* Interlace motif — signature divider, two lines weaving,

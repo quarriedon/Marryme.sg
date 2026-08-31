@@ -110,13 +110,13 @@ export default function PersonalityTestPage() {
         <p className="font-sans text-xs tracking-[0.15em] uppercase text-gold-soft mb-3">
           Question {step + 1} of {QUESTIONS.length}
         </p>
-        <div className="h-1 bg-white/10 rounded-full mb-8 overflow-hidden">
+        <div className="h-1 bg-[var(--gold)]/15 rounded-full mb-8 overflow-hidden">
           <div
             className="h-full bg-gold transition-all"
             style={{ width: `${progress}%` }}
           />
         </div>
-        <h1 className="font-display text-2xl md:text-3xl italic mb-8 leading-snug">
+        <h1 className="gilded-heading font-display text-2xl md:text-3xl italic mb-8 leading-snug">
           {question.text}
         </h1>
         <div className="space-y-3">

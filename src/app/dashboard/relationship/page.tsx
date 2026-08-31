@@ -13,7 +13,7 @@ export default function RelationshipPage() {
 
   return (
     <main className="px-6 py-10 max-w-2xl mx-auto">
-      <h1 className="font-display text-3xl mb-1">Your match</h1>
+      <h1 className="gilded-heading font-display text-3xl mb-1">Your match</h1>
       <p className="font-sans text-sm text-[var(--paper-dim)] mb-8">
         One connection at a time — no parallel conversations while
         you&rsquo;re talking with someone.

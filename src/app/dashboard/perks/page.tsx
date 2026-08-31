@@ -10,7 +10,7 @@ export default function PerksPage() {
 
   return (
     <main className="px-6 py-10 max-w-2xl mx-auto">
-      <h1 className="font-display text-3xl mb-1">Your wedding gift</h1>
+      <h1 className="gilded-heading font-display text-3xl mb-1">Your wedding gift</h1>
       <p className="font-sans text-sm text-[var(--paper-dim)] mb-8">
         Found your match with us? Your wedding-day photoshoot and album
         are on the house.
