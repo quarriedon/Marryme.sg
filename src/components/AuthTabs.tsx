@@ -230,7 +230,7 @@ function SubmitButton({
     <button
       type="submit"
       disabled={loading}
-      className="w-full bg-ink text-[var(--paper)] font-sans font-medium rounded-lg px-3 py-2.5 hover:bg-ink-soft transition-colors disabled:opacity-50"
+      className="w-full bg-ink text-[var(--paper)] font-sans font-medium rounded-lg px-3 py-2.5 border border-[var(--gold)]/25 hover:bg-ink-soft hover:border-[var(--gold)]/50 transition-colors disabled:opacity-50"
     >
       {loading ? "Please wait…" : children}
     </button>

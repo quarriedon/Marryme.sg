@@ -11,7 +11,7 @@ export default async function AdminPage() {
 
   return (
     <main className="px-6 py-10 max-w-3xl mx-auto">
-      <h1 className="font-display text-3xl mb-1">Admin</h1>
+      <h1 className="gilded-heading font-display text-3xl mb-1">Admin</h1>
       <p className="font-sans text-sm text-[var(--paper-dim)] mb-8">
         Pending profile approvals will appear here.
       </p>

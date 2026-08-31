@@ -45,7 +45,7 @@ export default async function MatchesPage() {
   if (activeMutual) {
     return (
       <main className="px-6 py-10 max-w-2xl mx-auto">
-        <h1 className="font-display text-3xl mb-4">You have an active match</h1>
+        <h1 className="gilded-heading font-display text-3xl mb-4">You have an active match</h1>
         <p className="font-sans text-sm text-[var(--paper-dim)]">
           New batches only arrive when you&rsquo;re between matches. Head to
           your{" "}
@@ -91,7 +91,7 @@ export default async function MatchesPage() {
 
   return (
     <main className="px-6 py-10 max-w-2xl mx-auto">
-      <h1 className="font-display text-3xl mb-1">Your five, this week</h1>
+      <h1 className="gilded-heading font-display text-3xl mb-1">Your five, this week</h1>
       <p className="font-sans text-sm text-[var(--paper-dim)] mb-2 max-w-lg">
         No swiping, no browsing beyond this. Express interest in up to two —
         if it&rsquo;s mutual, you&rsquo;ll unlock chat right away.

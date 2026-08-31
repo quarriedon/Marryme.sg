@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, IBM_Plex_Sans } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
+import { GoldFlakes } from "@/components/GoldFlakes";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -33,7 +34,10 @@ export default function RootLayout({
       className={`${fraunces.variable} ${plex.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-ink text-[var(--text-on-ink)]">
-        <SessionProvider>{children}</SessionProvider>
+        <GoldFlakes />
+        <SessionProvider>
+          <div className="relative z-10 flex-1 flex flex-col">{children}</div>
+        </SessionProvider>
       </body>
     </html>
   );

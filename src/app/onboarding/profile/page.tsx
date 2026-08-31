@@ -280,7 +280,7 @@ export default function ProfileOnboardingPage() {
         <button
           type="submit"
           disabled={submitting || !faithMatters}
-          className="w-full bg-ink text-[var(--paper)] font-sans font-medium rounded-lg px-3 py-3 hover:bg-ink-soft transition-colors disabled:opacity-50"
+          className="w-full bg-ink text-[var(--paper)] font-sans font-medium rounded-lg px-3 py-3 border border-[var(--gold)]/25 hover:bg-ink-soft hover:border-[var(--gold)]/50 transition-colors disabled:opacity-50"
         >
           {submitting ? "Saving…" : "See my matches"}
         </button>

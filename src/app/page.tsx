@@ -9,7 +9,7 @@ export default function Home() {
         <p className="font-sans text-xs tracking-[0.2em] uppercase text-gold-soft mb-6">
           Singapore · Est. for people who mean it
         </p>
-        <h1 className="font-display text-4xl md:text-6xl leading-[1.05] italic text-[var(--text-on-ink)]">
+        <h1 className="gilded-heading font-display text-4xl md:text-6xl leading-[1.05] italic text-[var(--text-on-ink)]">
           Date like you&rsquo;re building
           <br className="hidden md:block" /> a life, not a highlight reel.
         </h1>
@@ -22,13 +22,13 @@ export default function Home() {
         <div className="flex items-center justify-center gap-4 mt-10">
           <Link
             href="/signup"
-            className="bg-gold text-ink font-sans font-medium px-6 py-3 rounded-full hover:bg-gold-soft transition-colors"
+            className="bg-gold text-ink font-sans font-medium px-6 py-3 rounded-full hover:bg-gold-soft hover:shadow-[0_0_24px_rgba(227,200,135,0.4)] transition-all"
           >
             Create your profile
           </Link>
           <Link
             href="/login"
-            className="font-sans text-[var(--paper-dim)] px-6 py-3 hover:text-[var(--text-on-ink)] transition-colors"
+            className="font-sans text-[var(--paper-dim)] px-6 py-3 hover:text-gold-soft transition-colors"
           >
             Sign in
           </Link>
@@ -64,12 +64,12 @@ export default function Home() {
 
       {/* CTA band */}
       <section className="px-6 py-20 text-center">
-        <h2 className="font-display italic text-2xl md:text-3xl max-w-lg mx-auto">
+        <h2 className="gilded-heading font-display italic text-2xl md:text-3xl max-w-lg mx-auto">
           Your next chapter starts with one honest conversation.
         </h2>
         <Link
           href="/signup"
-          className="inline-block mt-8 bg-gold text-ink font-sans font-medium px-7 py-3 rounded-full hover:bg-gold-soft transition-colors"
+          className="inline-block mt-8 bg-gold text-ink font-sans font-medium px-7 py-3 rounded-full hover:bg-gold-soft hover:shadow-[0_0_24px_rgba(227,200,135,0.4)] transition-all"
         >
           Join MarryMe.sg
         </Link>

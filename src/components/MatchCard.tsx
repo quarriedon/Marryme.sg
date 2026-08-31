@@ -50,7 +50,7 @@ export function MatchCard({
         <button
           disabled={interested || (interestDisabled && !interested) || pending}
           onClick={onExpressInterest}
-          className="bg-ink text-[var(--paper)] font-sans text-sm font-medium rounded-full px-4 py-2 hover:bg-ink-soft transition-colors disabled:opacity-40"
+          className="bg-ink text-[var(--paper)] font-sans text-sm font-medium rounded-full px-4 py-2 border border-[var(--gold)]/25 hover:bg-ink-soft hover:border-[var(--gold)]/50 transition-colors disabled:opacity-40"
         >
           {interested ? "Interest sent" : pending ? "Sending…" : "Express interest"}
         </button>

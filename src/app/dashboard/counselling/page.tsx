@@ -11,7 +11,7 @@ export default function CounsellingPage() {
 
   return (
     <main className="px-6 py-10 max-w-2xl mx-auto">
-      <h1 className="font-display text-3xl mb-1">Pre-marriage counselling</h1>
+      <h1 className="gilded-heading font-display text-3xl mb-1">Pre-marriage counselling</h1>
       <p className="font-sans text-sm text-[var(--paper-dim)] mb-8">
         If you and your match are ready to take this to marriage,
         we&rsquo;ll connect you with a counsellor before the big day.
@@ -27,7 +27,7 @@ export default function CounsellingPage() {
             </p>
             <button
               onClick={() => setRequested(true)}
-              className="bg-ink text-[var(--paper)] font-sans text-sm font-medium rounded-full px-5 py-2.5 hover:bg-ink-soft transition-colors"
+              className="bg-ink text-[var(--paper)] font-sans text-sm font-medium rounded-full px-5 py-2.5 border border-[var(--gold)]/25 hover:bg-ink-soft hover:border-[var(--gold)]/50 transition-colors"
             >
               Request counselling
             </button>

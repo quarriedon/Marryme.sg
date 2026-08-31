@@ -12,24 +12,24 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex-1 flex flex-col">
-      <nav className="border-b border-white/10 px-6 py-4 flex items-center justify-between">
+      <nav className="border-b border-[var(--gold)]/15 px-6 py-4 flex items-center justify-between">
         <Link href="/" className="font-display italic text-gold-soft">
           MarryMe.sg
         </Link>
         <div className="flex gap-5 font-sans text-sm text-[var(--paper-dim)]">
-          <Link href="/dashboard/matches" className="hover:text-white">
+          <Link href="/dashboard/matches" className="transition-colors hover:text-gold-soft">
             Matches
           </Link>
-          <Link href="/dashboard/relationship" className="hover:text-white">
+          <Link href="/dashboard/relationship" className="transition-colors hover:text-gold-soft">
             Relationship
           </Link>
-          <Link href="/dashboard/messages" className="hover:text-white">
+          <Link href="/dashboard/messages" className="transition-colors hover:text-gold-soft">
             Messages
           </Link>
-          <Link href="/dashboard/counselling" className="hover:text-white">
+          <Link href="/dashboard/counselling" className="transition-colors hover:text-gold-soft">
             Counselling
           </Link>
-          <Link href="/dashboard/perks" className="hover:text-white">
+          <Link href="/dashboard/perks" className="transition-colors hover:text-gold-soft">
             Perks
           </Link>
           <form
@@ -38,7 +38,7 @@ export default async function DashboardLayout({
               await signOut({ redirectTo: "/" });
             }}
           >
-            <button className="hover:text-white">Sign out</button>
+            <button className="transition-colors hover:text-gold-soft">Sign out</button>
           </form>
         </div>
       </nav>
