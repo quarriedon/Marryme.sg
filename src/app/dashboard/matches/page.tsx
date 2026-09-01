@@ -4,6 +4,7 @@
 // batch and lets the user express interest in up to 2 of them.
 
 import { redirect } from "next/navigation";
+import { ageFromDob } from "@/lib/age";
 import { Interlace } from "@/components/Interlace";
 import { MatchBatch } from "@/components/MatchBatch";
 import type { MatchCandidate } from "@/components/MatchCard";
@@ -20,16 +21,8 @@ type CandidateRow = {
   bio: string | null;
 };
 
-function ageFromDob(dateOfBirth: string | null): number | null {
-  if (!dateOfBirth) return null;
-  const dob = new Date(dateOfBirth);
-  const now = new Date();
-  let age = now.getFullYear() - dob.getFullYear();
-  const hadBirthday =
-    now.getMonth() > dob.getMonth() ||
-    (now.getMonth() === dob.getMonth() && now.getDate() >= dob.getDate());
-  if (!hadBirthday) age -= 1;
-  return age;
+function displayAge(dateOfBirth: string | null): number | null {
+  return dateOfBirth ? ageFromDob(dateOfBirth) : null;
 }
 
 export default async function MatchesPage() {
@@ -83,7 +76,7 @@ export default async function MatchesPage() {
   const candidates: MatchCandidate[] = batchRows.map((r) => ({
     matchedUserId: r.matched_user_id,
     name: r.full_name ?? "Someone new",
-    age: ageFromDob(r.date_of_birth),
+    age: displayAge(r.date_of_birth),
     occupation: r.occupation,
     location: r.location,
     bio: r.bio,

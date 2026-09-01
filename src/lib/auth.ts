@@ -2,7 +2,8 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { query, queryOne } from "@/lib/db";
-import type { OtpCodeRow, UserRole, UserRow, UserStatus } from "@/types/database";
+import { verifyAndConsumeOtp } from "@/lib/otp";
+import type { UserRole, UserRow, UserStatus } from "@/types/database";
 
 /**
  * Two Credentials providers, replacing Supabase Auth's email/password
@@ -62,20 +63,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const otp = await queryOne<OtpCodeRow>(
-          `SELECT * FROM otp_codes
-           WHERE phone = ? AND consumed_at IS NULL AND expires_at > NOW()
-           ORDER BY created_at DESC LIMIT 1`,
-          [phone]
-        );
-        if (!otp) return null;
-
-        const valid = await bcrypt.compare(code, otp.code_hash);
+        const valid = await verifyAndConsumeOtp(phone, code);
         if (!valid) return null;
-
-        await query("UPDATE otp_codes SET consumed_at = NOW() WHERE id = ?", [
-          otp.id,
-        ]);
 
         // Phone sign-in doubles as sign-up, matching the previous
         // Supabase behaviour: verifying a code creates the account
@@ -108,6 +97,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.id = user.id;
         token.role = user.role;
         token.status = user.status;
+        // `user` is only populated on an actual sign-in (not on every
+        // JWT refresh), so this runs once per login — see the
+        // Activity summary on /dashboard/profile.
+        await query("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
       }
       return token;
     },

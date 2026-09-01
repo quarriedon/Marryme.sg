@@ -22,8 +22,9 @@ npm run dev
 ## MySQL setup
 1. In Plesk: Databases → create a MySQL database and a user with full privileges on it. Note the host, port, username, password, and database name.
 2. Put those into `.env.local` as `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` — never commit real values, `.env.local` is gitignored.
-3. Run `mysql/schema.sql` against that database (via Plesk's phpMyAdmin, or `mysql -h HOST -u USER -p DATABASE < mysql/schema.sql`) to create `users`, `otp_codes`, `matches`, `interests`, `mutual_matches`, `messages`, `memberships`, and `counselling_requests`. Requires MySQL 8.0.16+ or MariaDB 10.2+ (for `DEFAULT (UUID())` and `CHECK` constraint support) — check with your host if unsure.
-4. There's no row-level security in MySQL — every access rule that used to live in a Supabase RLS policy is now enforced in application code (route handlers under `src/app/api/`, and `src/lib/auth.ts` / `src/lib/matching/engine.ts`). Never query these tables directly from a Client Component.
+3. **New database:** run `mysql/schema.sql` in full. **Existing database** (you already ran `schema.sql` before this session's changes): run `mysql/schema.sql` once, then also run each file under `mysql/migrations/` in order — they're additive (`ALTER TABLE ... ADD COLUMN`, `CREATE TABLE IF NOT EXISTS`) and safe to run against data you already have.
+4. Requires MySQL 8.0.16+ or MariaDB 10.2+ (for `DEFAULT (UUID())` and `CHECK` constraint support) — check with your host if unsure.
+5. There's no row-level security in MySQL — every access rule that used to live in a Supabase RLS policy is now enforced in application code (route handlers under `src/app/api/`, and `src/lib/auth.ts` / `src/lib/matching/engine.ts`). Never query these tables directly from a Client Component.
 
 ## Auth setup
 - Generate a secret: `npx auth secret`, put it in `.env.local` as `AUTH_SECRET`.
@@ -44,7 +45,19 @@ The engine runs two ways:
   ```
   On Plesk: Scheduled Tasks → add a new task running that `curl` command once a day. This is a plain Node route, not a Vercel Cron job or Edge Function, so it works on any host.
 
-Faith is a hard filter, not just a preference: if faith matters to a user, they're only shown faith-compatible candidates (same faith, or mutual openness to another faith); if it doesn't matter to them, they're only shown other users for whom it also doesn't matter.
+Faith is a hard filter, not just a preference: if faith matters to a user, they're only shown faith-compatible candidates (same faith, or mutual openness to another faith); if it doesn't matter to them, they're only shown other users for whom it also doesn't matter. Note this is separate from Religion (`own_faith`) as a profile field — every user states their own religion regardless of whether it matters to them in a partner.
+
+## Photo uploads
+
+Profile photos (1–3, JPG/PNG/WebP, 5MB max each) go through `POST /api/photos/upload`, are screened by `src/lib/moderation.ts`, and are stored on local disk — not in `public/` or `.next/`, and not in Supabase-style object storage (there's no existing storage dependency in this repo, and this avoids adding one).
+
+- **`UPLOADS_DIR`** (required) must point somewhere that survives a rebuild. This repo builds with `output: "standalone"`, which regenerates `.next` from scratch on every `npm run build` — anything stored under `.next` or the deploy folder itself would be deleted on the next deploy. On Plesk, set this to an absolute path outside the git checkout (e.g. `/var/www/marryme-uploads`). For local dev, `./storage/uploads` is fine.
+- Photos are served back through `GET /api/photos/[id]` (gated on being signed in, not on being the photo's owner — profile photos are meant to be seen by curated matches) rather than as static files.
+
+**Moderation: Google Cloud Vision**, called directly via `fetch` (no SDK) — see `src/lib/moderation.ts`. Chosen over AWS Rekognition and Azure AI Content Safety because it's the only one of the three that does SafeSearch content moderation *and* face detection in a single plain REST call authenticated with just an API key; Rekognition needs SigV4 request signing (effectively requiring the AWS SDK), and Azure's Content Safety API has no face detection at all.
+
+- **`GOOGLE_CLOUD_VISION_API_KEY`** — without it, uploads skip moderation entirely (a warning is logged on every upload) rather than blocking uploads in environments that haven't set it up. Set this before launch, or photos are not being screened for inappropriate content or checked for a visible face.
+- Rejections (not the images) are logged to `photo_moderation_log` for reviewing abuse patterns later.
 
 ## Deploying on Plesk (Node.js)
 
@@ -78,14 +91,15 @@ This uses Next's [`output: "standalone"`](https://nextjs.org/docs/app/api-refere
 **Reverse proxy note:** Plesk's Node.js hosting sits behind its own reverse proxy (nginx/Apache) in front of the Node app. NextAuth needs to see the real public host and protocol to set cookies and validate sign-in correctly — `trustHost: true` is set in `src/lib/auth.ts` for this, and `AUTH_URL` should be set to your real `https://` domain in the environment variables. If login ever silently does nothing again (no error, no redirect) after this is all working, check that the proxy is forwarding `X-Forwarded-Host` / `X-Forwarded-Proto` correctly — a mismatch there is the next most likely cause after a static-asset problem.
 
 ## What's stubbed vs. real in this MVP
-- **Real:** email/password signup+login and phone OTP signup+login (via NextAuth Credentials providers against MySQL), protected `/dashboard` and `/admin` routes (via `proxy.ts` + role checks), the full MySQL schema, the matching engine (batch generation, faith filtering, mutual-interest detection, cooling-off), the onboarding profile/preferences form.
-- **Stubbed:** messages page (schema is in place — no send/receive UI or real-time wiring yet), admin page (no real moderation queue yet), profile photo field is a plain URL input rather than a real upload, phone OTP codes are logged to the server console instead of sent via SMS. Newly onboarded profiles are auto-approved (no manual review queue yet), and there's no gate yet on `/dashboard/matches` requiring an active membership.
-- **Deferred to post-MVP:** Singpass login (button is present but disabled — requires relying-party registration with the Singpass developer portal, which takes a few days to get approved), Stripe billing for any paid tier.
+- **Real:** email/password signup+login and phone OTP signup+login (via NextAuth Credentials providers against MySQL), protected `/dashboard` and `/admin` routes (via `proxy.ts` + role checks), the full MySQL schema, the matching engine (batch generation, faith filtering, mutual-interest detection, cooling-off), the full onboarding profile form (identity, religion, community, relationship intent, optional details, photo upload with moderation, consent), a 12-question personality test, the "My Profile" activity page, and account deletion with full cascade.
+- **Stubbed:** messages page (schema is in place — no send/receive UI or real-time wiring yet), admin page (no real moderation queue yet), phone OTP codes and photo moderation both log warnings and either skip or hold until their respective providers (SMS, Google Vision) are configured — see the Photo uploads and Auth setup sections above. Newly onboarded profiles are auto-approved (no manual review queue yet), and there's no gate yet on `/dashboard/matches` requiring an active membership. `/privacy` and `/terms` are placeholder pages flagging that real legal copy is needed, not actual policies — don't treat them as launch-ready.
+- **Deferred to post-MVP:** Singpass login (button is present but disabled — requires relying-party registration with the Singpass developer portal, which takes a few days to get approved), Stripe billing for any paid tier, verifying an email address added after a phone-only signup (no outbound email/SMTP provider is wired up — it's stored but unverified).
 
 ## Next steps, roughly in order
 1. Wire messaging with real-time updates (polling or a small WebSocket/SSE layer, since Supabase Realtime is gone), gated on an active `mutual_match`.
 2. Wire `POST /api/auth/send-otp` to a real SMS provider (Twilio or similar) instead of console-logging the code.
-3. Add Stripe Checkout for `memberships`, and gate `/dashboard/matches` behind an active membership.
-4. Build out the admin dashboard: profile approval queue, match batch review/override, counselling request queue, stats.
-5. Photo upload to object storage instead of a raw URL field.
-6. Apply for Singpass relying-party access, swap in the real login button.
+3. Set `GOOGLE_CLOUD_VISION_API_KEY` so photo moderation actually runs (currently skipped with a warning).
+4. Get real legal copy into `/privacy` and `/terms` before launch.
+5. Add Stripe Checkout for `memberships`, and gate `/dashboard/matches` behind an active membership.
+6. Build out the admin dashboard: profile approval queue, match batch review/override, counselling request queue, stats.
+7. Apply for Singpass relying-party access, swap in the real login button.
