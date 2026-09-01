@@ -55,13 +55,78 @@ const QUESTIONS: Question[] = [
     ],
   },
   {
-    id: "love_language",
+    id: "love_language_receive",
     text: "You feel most cared for when someone...",
     options: [
       "Tells you directly how they feel",
       "Spends focused, undistracted time with you",
       "Does something practical to help you out",
       "Shows physical affection",
+    ],
+  },
+  {
+    id: "love_language_express",
+    text: "You show someone you care by...",
+    options: [
+      "Telling them directly",
+      "Spending quality time with them",
+      "Doing helpful things for them",
+      "Physical affection, like a hug",
+    ],
+  },
+  {
+    id: "communication_style",
+    text: "How would you describe the way you communicate?",
+    options: [
+      "Direct and to the point",
+      "Diplomatic — I choose my words carefully",
+      "I prefer to listen more than speak",
+      "I use humour to lighten serious moments",
+    ],
+  },
+  {
+    id: "conflict_resolution",
+    text: "When there's tension in a relationship, you're most likely to...",
+    options: [
+      "Address it head-on right away",
+      "Need some space before talking it through",
+      "Look for a middle ground quickly",
+      "Avoid it and hope it resolves itself",
+    ],
+  },
+  {
+    id: "core_values",
+    text: "Which matters most to you in life right now?",
+    options: ["Family", "Career", "Faith or spirituality", "Independence and personal growth"],
+  },
+  {
+    id: "spontaneity",
+    text: "When plans change at the last minute, you...",
+    options: [
+      "Go with the flow easily",
+      "Feel a bit thrown off, but adjust",
+      "Prefer to stick to the original plan",
+      "Try to turn it into something better",
+    ],
+  },
+  {
+    id: "attachment_style",
+    text: "In a relationship, you tend to...",
+    options: [
+      "Need regular reassurance that things are okay",
+      "Feel comfortable with space and independence",
+      "Get anxious when things feel uncertain",
+      "Balance closeness and independence easily",
+    ],
+  },
+  {
+    id: "children_expectations",
+    text: "How do you feel about having children?",
+    options: [
+      "Definitely want children",
+      "Open to it, not set on it",
+      "Prefer not to have children",
+      "Still figuring this out",
     ],
   },
 ];

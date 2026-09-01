@@ -1,4 +1,5 @@
 import { query, queryOne, withTransaction } from "@/lib/db";
+import { ageFromDob } from "@/lib/age";
 import type { Interest, MatchRow, MutualMatch, Profile, UserRow } from "@/types/database";
 import { BATCH_SIZE, MAX_INTERESTS_PER_BATCH, BATCH_DURATION_DAYS } from "@/lib/matching/constants";
 
@@ -13,16 +14,6 @@ function toProfile(row: UserRow): Profile {
       row.open_to_other_faith === null ? null : Boolean(row.open_to_other_faith),
     photos: row.photos ?? [],
   };
-}
-
-function ageFromDob(dateOfBirth: string, on: Date = new Date()): number {
-  const dob = new Date(dateOfBirth);
-  let age = on.getFullYear() - dob.getFullYear();
-  const hasHadBirthdayThisYear =
-    on.getMonth() > dob.getMonth() ||
-    (on.getMonth() === dob.getMonth() && on.getDate() >= dob.getDate());
-  if (!hasHadBirthdayThisYear) age -= 1;
-  return age;
 }
 
 /**

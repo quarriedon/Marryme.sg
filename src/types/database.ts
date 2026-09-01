@@ -7,6 +7,17 @@ export type MutualMatchStatus = "active" | "ended";
 export type MembershipTier = "founding" | "regular" | "priority";
 export type CounsellorType = "relationship" | "marriage" | "religious";
 export type CounsellingRequestStatus = "pending" | "contacted" | "closed";
+export type Community = "chinese" | "malay" | "indian" | "eurasian" | "other";
+export type RelationshipIntent = "marriage_minded" | "open_to_marriage" | "not_sure";
+export type EducationLevel =
+  | "secondary"
+  | "diploma"
+  | "bachelors"
+  | "masters"
+  | "phd"
+  | "other";
+export type SmokingPreference = "non_smoker" | "occasional" | "regular";
+export type DrinkingPreference = "non_drinker" | "social" | "regular";
 
 // Full row as stored — includes password_hash. Never send this
 // straight to the client; pick only the fields you need (see the
@@ -25,9 +36,18 @@ export type UserRow = {
   occupation: string | null;
   role: UserRole;
   status: UserStatus;
-  faith_matters_to_them: 0 | 1;
   own_faith: string | null;
+  faith_matters_to_them: 0 | 1;
   open_to_other_faith: 0 | 1 | null;
+  community: Community | null;
+  relationship_intent: RelationshipIntent | null;
+  education_level: EducationLevel | null;
+  height_cm: number | null;
+  smoking: SmokingPreference | null;
+  drinking: DrinkingPreference | null;
+  terms_accepted_at: string | null;
+  photo_consent_accepted_at: string | null;
+  last_login_at: string | null;
   years_out_of_relationship: number | null;
   preferred_gender: Gender | null;
   preferred_age_min: number | null;
@@ -111,4 +131,11 @@ export type CounsellingRequest = {
   requested_at: string;
   counsellor_type: CounsellorType;
   status: CounsellingRequestStatus;
+};
+
+export type PhotoModerationLog = {
+  id: string;
+  user_id: string;
+  reason: string;
+  created_at: string;
 };

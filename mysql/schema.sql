@@ -40,12 +40,27 @@ CREATE TABLE IF NOT EXISTS users (
   role ENUM('member', 'admin') NOT NULL DEFAULT 'member',
   status ENUM('pending', 'approved', 'suspended') NOT NULL DEFAULT 'pending',
 
-  -- Faith is asked once, up front, and gates matching rather than
-  -- just scoring it. Never shown or asked again if the user says it
-  -- doesn't matter to them.
-  faith_matters_to_them BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Religion is compulsory on every profile (own_faith). Whether
+  -- faith should gate matching is a separate question the user
+  -- answers for themselves about their *match*, not about their own
+  -- profile — see isFaithCompatible() in the matching engine.
   own_faith VARCHAR(255),
+  faith_matters_to_them BOOLEAN NOT NULL DEFAULT FALSE,
   open_to_other_faith BOOLEAN,
+
+  community ENUM('chinese', 'malay', 'indian', 'eurasian', 'other'),
+  relationship_intent ENUM('marriage_minded', 'open_to_marriage', 'not_sure'),
+
+  education_level ENUM('secondary', 'diploma', 'bachelors', 'masters', 'phd', 'other'),
+  height_cm INT,
+  smoking ENUM('non_smoker', 'occasional', 'regular'),
+  drinking ENUM('non_drinker', 'social', 'regular'),
+
+  -- Consent timestamps. Both are required (non-null) before a
+  -- profile can be marked 'approved' — see POST /api/onboarding/profile.
+  terms_accepted_at DATETIME,
+  photo_consent_accepted_at DATETIME,
+  last_login_at DATETIME,
 
   years_out_of_relationship INT,
 
@@ -206,4 +221,19 @@ CREATE TABLE IF NOT EXISTS counselling_requests (
 
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_counselling_requests_user (user_id)
+);
+
+-- ============================================================
+-- photo_moderation_log — records moderation rejections (event only,
+-- never the image itself) so patterns of abuse can be reviewed
+-- later. See src/lib/moderation.ts.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS photo_moderation_log (
+  id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  user_id CHAR(36) NOT NULL,
+  reason VARCHAR(255) NOT NULL, -- e.g. 'explicit_content', 'no_face_detected', 'provider_error'
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_photo_moderation_log_user (user_id)
 );
