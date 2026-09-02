@@ -90,6 +90,26 @@ This uses Next's [`output: "standalone"`](https://nextjs.org/docs/app/api-refere
 
 `npm run build` runs through `scripts/run-build.mjs`, which sets `RAYON_NUM_THREADS=1`, `RAYON_RS_NUM_CPUS=1`, and `TOKIO_WORKER_THREADS=1` before invoking `next build` to cap all of them — safe on any host (only limits parallelism, never correctness), and it won't override a variable you've already set yourself, so a future, less-constrained host can raise them. If a build still fails after this with a *different* native thread/process error, the pattern is the same: check which env var the specific Rust thread pool reads (`strings node_modules/@next/swc-*/*.node | grep -i thread` is how these three were found) and add it to `run-build.mjs`. If it's genuine memory exhaustion rather than a thread-count ceiling, the error won't mention threads/processes at all — check the actual memory limit Plesk enforces on the Node.js application (separate from the VPS's total RAM) and raise it if possible. As a last resort, `next build --webpack` avoids Turbopack's native thread pools entirely (slower, but a real fallback if this specific host's thread ceiling turns out to be lower than any of these pools can be configured down to).
 
+**If the host's process/thread ceiling is below what any of these env vars can reach** (for example, a CloudLinux LVE account limit that's invisible to `ulimit` and enforced at the kernel level) — capping Rayon and Tokio to 1 thread each still spawns more than one OS thread/process at a time during a build (Node itself, the `next-swc` native addon, and the worker threads/processes it forks all count against the ceiling), so a build can keep failing with the same `EAGAIN` / `os error 11` even at the lowest possible settings. If that's the case, stop building on the Plesk host entirely — build the app somewhere without that ceiling, and deploy only the already-compiled output:
+
+1. **Build locally or in CI**, using the exact same Node major version as the Plesk app (check Plesk's Node.js panel for the version currently selected) so any platform-specific native binaries match:
+   ```bash
+   npm ci
+   npm run build   # produces .next/standalone/, .next/static/, and runs postbuild
+   ```
+   This runs on your own machine or a CI runner (GitHub Actions, etc.) — nothing here touches the Plesk host's thread/process limits, because Turbopack never runs there.
+2. **Copy three things to the server**, preserving this layout under your Application Root:
+   - `.next/standalone/` → the whole directory, including the `server.js` Next generated and the `public/` + `.next/static/` files `scripts/copy-standalone-assets.mjs` already merged into it during `postbuild`. Nothing else needs copying manually — that script's whole job is to make `.next/standalone/` self-contained.
+   - `node_modules/` is **not** needed separately — `output: "standalone"` traces and includes only the runtime dependencies actually used, already inside `.next/standalone/node_modules/`.
+   - You do **not** need to copy `src/`, `.git/`, or any dev dependency — none of it is required to run the built app.
+   - A simple way to move it: `rsync -avz --delete .next/standalone/ user@server:/path/to/app-root/` (or zip it and upload through Plesk's File Manager if you don't have SSH `rsync` access).
+3. **In Plesk's Node.js panel**, set "Application Startup File" to `server.js` (now at the root of what you uploaded, since you uploaded the *contents* of `.next/standalone/`, not the folder itself) and skip **NPM Install** and **Run Build** entirely — there's nothing to install or build on the server anymore, only `node server.js` to run.
+4. **Set the same environment variables** as before (Plesk Node.js panel → Custom environment variables) — the compiled app still reads `MYSQL_*`, `AUTH_SECRET`, `AUTH_URL`, `UPLOADS_DIR`, etc. at runtime, same as any other deploy.
+5. **Restart App** in the Plesk Node.js panel.
+6. For future changes: repeat step 1 on your machine/CI, then re-sync `.next/standalone/` to the server and restart — there's no `git pull` + `Run Build` cycle on the host anymore, since the host never builds anything.
+
+This trades a one-click "pull and build on the server" workflow for a manual (or CI-automated) upload step, but it fully avoids Turbopack's native thread pools on a host where they can't be brought under the account's ceiling no matter how low the pool sizes are set.
+
 **Reverse proxy note:** Plesk's Node.js hosting sits behind its own reverse proxy (nginx/Apache) in front of the Node app. NextAuth needs to see the real public host and protocol to set cookies and validate sign-in correctly — `trustHost: true` is set in `src/lib/auth.ts` for this, and `AUTH_URL` should be set to your real `https://` domain in the environment variables. If login ever silently does nothing again (no error, no redirect) after this is all working, check that the proxy is forwarding `X-Forwarded-Host` / `X-Forwarded-Proto` correctly — a mismatch there is the next most likely cause after a static-asset problem.
 
 ## What's stubbed vs. real in this MVP
