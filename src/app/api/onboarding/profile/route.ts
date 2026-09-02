@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { auth } from "@/lib/auth";
 import { query, queryOne } from "@/lib/db";
 import { ageFromDob } from "@/lib/age";
-import type { UserRow } from "@/types/database";
+import type { PhotoRow, UserRow } from "@/types/database";
 
 /** Lets the profile form pre-fill known values (email/phone from signup, or a previous partial submission) and know which fields it still needs to collect. */
 export async function GET() {
@@ -20,9 +20,25 @@ export async function GET() {
   }
 
   const { password_hash, ...safeUser } = user;
+
+  // So the form can show a "pending review" badge on a photo that
+  // was saved but held back by moderation — see
+  // src/app/api/photos/upload/route.ts.
+  const photoIds = (user.photos ?? []).map((url) => url.split("/").pop()!).filter(Boolean);
+  let photoStatuses: Record<string, string> = {};
+  if (photoIds.length > 0) {
+    const placeholders = photoIds.map(() => "?").join(",");
+    const rows = await query<Pick<PhotoRow, "id" | "status">>(
+      `SELECT id, status FROM photos WHERE id IN (${placeholders})`,
+      photoIds
+    );
+    photoStatuses = Object.fromEntries(rows.map((r) => [r.id, r.status]));
+  }
+
   return NextResponse.json({
     ...safeUser,
     hasPassword: Boolean(password_hash),
+    photoStatuses,
   });
 }
 
@@ -224,6 +240,28 @@ export async function POST(request: NextRequest) {
       session.user.id,
     ]
   );
+
+  // Founding-member free access: auto-grant it once, on first
+  // profile completion, while launch access is enabled — see the
+  // homepage banner ("Founding members get free access") and
+  // /admin/memberships, where an admin can extend or convert it.
+  // Off by default is wrong for a pre-launch app, so this defaults
+  // ON; set FOUNDING_ACCESS_ENABLED=false once launch access ends.
+  const foundingAccessEnabled = process.env.FOUNDING_ACCESS_ENABLED !== "false";
+  if (foundingAccessEnabled) {
+    const existingMembership = await queryOne<{ id: string }>(
+      "SELECT id FROM memberships WHERE user_id = ? LIMIT 1",
+      [session.user.id]
+    );
+    if (!existingMembership) {
+      const days = Number(process.env.FOUNDING_ACCESS_DAYS) || 180;
+      const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      await query(
+        "INSERT INTO memberships (id, user_id, tier, started_at, expires_at) VALUES (UUID(), ?, 'founding', NOW(), ?)",
+        [session.user.id, expiresAt]
+      );
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

@@ -22,7 +22,7 @@ npm run dev
 ## MySQL setup
 1. In Plesk: Databases → create a MySQL database and a user with full privileges on it. Note the host, port, username, password, and database name.
 2. Put those into `.env.local` as `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` — never commit real values, `.env.local` is gitignored.
-3. **New database:** run `mysql/schema.sql` in full. **Existing database** (you already ran `schema.sql` before this session's changes): run `mysql/schema.sql` once, then also run each file under `mysql/migrations/` in order — they're additive (`ALTER TABLE ... ADD COLUMN`, `CREATE TABLE IF NOT EXISTS`) and safe to run against data you already have.
+3. **New database:** run `mysql/schema.sql` in full. **Existing database** (you already ran `schema.sql` before this session's changes): run `mysql/schema.sql` once, then also run each file under `mysql/migrations/` in order — they're additive (`ALTER TABLE ... ADD COLUMN`, `CREATE TABLE IF NOT EXISTS`) and safe to run against data you already have. If you already ran `0002`, you still need to run `0003_photo_review_queue.sql` (adds the `photos` table the admin panel's photo review queue depends on).
 4. Requires MySQL 8.0.16+ or MariaDB 10.2+ (for `DEFAULT (UUID())` and `CHECK` constraint support) — check with your host if unsure.
 5. There's no row-level security in MySQL — every access rule that used to live in a Supabase RLS policy is now enforced in application code (route handlers under `src/app/api/`, and `src/lib/auth.ts` / `src/lib/matching/engine.ts`). Never query these tables directly from a Client Component.
 
@@ -56,8 +56,8 @@ Profile photos (1–3, JPG/PNG/WebP, 5MB max each) go through `POST /api/photos/
 
 **Moderation: Google Cloud Vision**, called directly via `fetch` (no SDK) — see `src/lib/moderation.ts`. Chosen over AWS Rekognition and Azure AI Content Safety because it's the only one of the three that does SafeSearch content moderation *and* face detection in a single plain REST call authenticated with just an API key; Rekognition needs SigV4 request signing (effectively requiring the AWS SDK), and Azure's Content Safety API has no face detection at all.
 
-- **`GOOGLE_CLOUD_VISION_API_KEY`** — without it, uploads skip moderation entirely (a warning is logged on every upload) rather than blocking uploads in environments that haven't set it up. Set this before launch, or photos are not being screened for inappropriate content or checked for a visible face.
-- Rejections (not the images) are logged to `photo_moderation_log` for reviewing abuse patterns later.
+- **`GOOGLE_CLOUD_VISION_API_KEY`** — without it, uploads skip moderation entirely (a warning is logged on every upload, and every photo is saved as `approved`) rather than blocking uploads in environments that haven't set it up. Set this before launch, or photos are not being screened for inappropriate content or checked for a visible face.
+- A photo Vision flags is **not** rejected outright — it's saved and held as `pending_review` (the `photos` table tracks this), invisible to everyone but its owner and admins (enforced in `GET /api/photos/[id]`, the one route every viewing path goes through), until an admin approves or rejects it in `/admin/photos`. Rejecting also frees up the member's photo slot by removing it from their `users.photos` array. Rejections are also logged to `photo_moderation_log` for reviewing abuse patterns later.
 
 ## Deploying on Plesk (Node.js)
 
@@ -112,10 +112,21 @@ This trades a one-click "pull and build on the server" workflow for a manual (or
 
 **Reverse proxy note:** Plesk's Node.js hosting sits behind its own reverse proxy (nginx/Apache) in front of the Node app. NextAuth needs to see the real public host and protocol to set cookies and validate sign-in correctly — `trustHost: true` is set in `src/lib/auth.ts` for this, and `AUTH_URL` should be set to your real `https://` domain in the environment variables. If login ever silently does nothing again (no error, no redirect) after this is all working, check that the proxy is forwarding `X-Forwarded-Host` / `X-Forwarded-Proto` correctly — a mismatch there is the next most likely cause after a static-asset problem.
 
+## Admin panel
+
+`/admin` and everything under it is gated on `role = 'admin'` (see `src/app/admin/layout.tsx` — set a user's role directly in the database; there's no UI for promoting someone to admin yet). Four sections:
+
+- **Signups** (`/admin`) — every profile, most recent first, with contact info, community, status, membership tier, and a flag for any photos awaiting review.
+- **Photo review** (`/admin/photos`) — every photo currently held as `pending_review` (flagged by Google Vision at upload — see Photo uploads above), with the flagged reason and Approve/Reject actions. Approving makes it visible on the member's profile; rejecting keeps it hidden permanently and frees up their photo slot.
+- **Matches** (`/admin/matches`) — search a member, see their current curated batch (with interest/reciprocal-interest indicators), remove or add a candidate, or force a mutual match between two members directly (bypasses the reciprocal-interest requirement, still respects the one-active-mutual-match-at-a-time rule). For support cases where the algorithm's suggestion needs a human correction.
+- **Memberships** (`/admin/memberships`) — every membership row (tier, started, expires), a form to grant one to any member by email, and an inline editor to adjust an existing expiry (e.g. extending free access, or setting when it should convert to paid).
+
+Founding-member access is granted automatically the first time a new user completes onboarding (see `FOUNDING_ACCESS_ENABLED` / `FOUNDING_ACCESS_DAYS` in `.env.example`) — this is what makes the homepage's "Founding members get free access" banner actually true rather than just copy. `FOUNDING_ACCESS_DAYS` (default 180) is a placeholder grant length; adjust it, or edit individual members' expiry in `/admin/memberships`, once you've decided the real founding-access window.
+
 ## What's stubbed vs. real in this MVP
-- **Real:** email/password signup+login and phone OTP signup+login (via NextAuth Credentials providers against MySQL), protected `/dashboard` and `/admin` routes (via `proxy.ts` + role checks), the full MySQL schema, the matching engine (batch generation, faith filtering, mutual-interest detection, cooling-off), the full onboarding profile form (identity, religion, community, relationship intent, optional details, photo upload with moderation, consent), a 12-question personality test, the "My Profile" activity page, and account deletion with full cascade.
-- **Stubbed:** messages page (schema is in place — no send/receive UI or real-time wiring yet), admin page (no real moderation queue yet), phone OTP codes and photo moderation both log warnings and either skip or hold until their respective providers (SMS, Google Vision) are configured — see the Photo uploads and Auth setup sections above. Newly onboarded profiles are auto-approved (no manual review queue yet), and there's no gate yet on `/dashboard/matches` requiring an active membership. `/privacy` and `/terms` are placeholder pages flagging that real legal copy is needed, not actual policies — don't treat them as launch-ready.
-- **Deferred to post-MVP:** Singpass login (button is present but disabled — requires relying-party registration with the Singpass developer portal, which takes a few days to get approved), Stripe billing for any paid tier, verifying an email address added after a phone-only signup (no outbound email/SMTP provider is wired up — it's stored but unverified).
+- **Real:** email/password signup+login and phone OTP signup+login (via NextAuth Credentials providers against MySQL), protected `/dashboard` and `/admin` routes (via role checks), the full MySQL schema, the matching engine (batch generation, faith filtering, mutual-interest detection, cooling-off) plus an admin override on top of it, the full onboarding profile form (identity, religion, community, relationship intent, optional details, photo upload with moderation and manual review, consent), a 12-question personality test, the "My Profile" activity page, account deletion with full cascade, a real admin panel (signup feed, photo review queue, match override, membership tracking), and founding-member free access auto-granted on signup.
+- **Stubbed:** messages page (schema is in place — no send/receive UI or real-time wiring yet), phone OTP codes log a warning and skip actually sending an SMS until an SMS provider is configured — see the Auth setup section above. Newly onboarded profiles are auto-approved at the account level (no manual review queue for the *profile* — only individual flagged *photos* go through manual review), and there's no gate yet on `/dashboard/matches` requiring an active membership (membership rows are tracked, but nothing currently checks them before showing matches). `/privacy` and `/terms` are placeholder pages flagging that real legal copy is needed, not actual policies — don't treat them as launch-ready.
+- **Deferred to post-MVP:** Singpass login (button is present but disabled — requires relying-party registration with the Singpass developer portal, which takes a few days to get approved), Stripe billing for any paid tier (memberships are tracked but not charged), verifying an email address added after a phone-only signup (no outbound email/SMTP provider is wired up — it's stored but unverified).
 
 ## Next steps, roughly in order
 1. Wire messaging with real-time updates (polling or a small WebSocket/SSE layer, since Supabase Realtime is gone), gated on an active `mutual_match`.
@@ -123,5 +134,6 @@ This trades a one-click "pull and build on the server" workflow for a manual (or
 3. Set `GOOGLE_CLOUD_VISION_API_KEY` so photo moderation actually runs (currently skipped with a warning).
 4. Get real legal copy into `/privacy` and `/terms` before launch.
 5. Add Stripe Checkout for `memberships`, and gate `/dashboard/matches` behind an active membership.
-6. Build out the admin dashboard: profile approval queue, match batch review/override, counselling request queue, stats.
-7. Apply for Singpass relying-party access, swap in the real login button.
+6. Add a UI for promoting a user to `role = 'admin'` — right now that's a direct database update (`UPDATE users SET role = 'admin' WHERE email = ?`).
+7. Expand the admin dashboard further: counselling request queue, stats/analytics.
+8. Apply for Singpass relying-party access, swap in the real login button.
