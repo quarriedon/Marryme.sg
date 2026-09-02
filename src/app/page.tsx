@@ -9,6 +9,12 @@ export default function Home() {
         <p className="font-sans text-xs tracking-[0.2em] uppercase text-gold-soft mb-6">
           Singapore · Est. for people who mean it
         </p>
+        <div className="inline-flex items-center gap-2 rounded-full border border-gold/40 bg-gold/10 px-4 py-1.5 mb-6 font-sans text-xs md:text-sm text-gold-soft">
+          <span aria-hidden="true">✦</span>
+          Founding members get free access while we build out the
+          community. Create your profile now and be among the first to
+          shape MarryMe.sg.
+        </div>
         <h1 className="gilded-heading font-display text-4xl md:text-6xl leading-[1.05] italic text-[var(--text-on-ink)]">
           Date like you&rsquo;re building
           <br className="hidden md:block" /> a life, not a highlight reel.
@@ -24,7 +30,7 @@ export default function Home() {
             href="/signup"
             className="bg-gold text-ink font-sans font-medium px-6 py-3 rounded-full hover:bg-gold-soft hover:shadow-[0_0_24px_rgba(227,200,135,0.4)] transition-all"
           >
-            Create your profile
+            Join free — limited launch spots
           </Link>
           <Link
             href="/login"
