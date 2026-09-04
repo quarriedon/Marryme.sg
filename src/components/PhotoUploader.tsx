@@ -4,24 +4,35 @@ import { useState } from "react";
 
 /**
  * Up to 3 photos, uploaded one at a time to POST /api/photos/upload
- * (which runs moderation before the file is ever saved — see
- * src/lib/moderation.ts) and referenced by URL in the parent form's
- * state. Plain <img>, not next/image: these are dynamic, auth-gated
- * routes rather than a fixed domain next/image could optimize.
+ * and referenced by URL in the parent form's state. Plain <img>, not
+ * next/image: these are dynamic, auth-gated routes rather than a
+ * fixed domain next/image could optimize.
+ *
+ * A photo that fails automated moderation is still saved and still
+ * counts toward the 3-photo limit, but stays invisible to everyone
+ * but its owner and admins until manually approved (see
+ * src/app/api/photos/upload/route.ts and /admin/photos) — `statuses`
+ * lets this component show that state instead of pretending nothing
+ * happened.
  */
 export function PhotoUploader({
   photos,
   onChange,
   disabled,
   disabledReason,
+  statuses: externalStatuses,
 }: {
   photos: string[];
   onChange: (photos: string[]) => void;
   disabled: boolean;
   disabledReason?: string;
+  statuses?: Record<string, string>;
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localStatuses, setLocalStatuses] = useState<Record<string, string>>({});
+
+  const statuses = { ...externalStatuses, ...localStatuses };
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -40,6 +51,9 @@ export function PhotoUploader({
       if (!res.ok) {
         setError(body.error ?? "Could not upload this photo.");
         return;
+      }
+      if (body.status === "pending_review") {
+        setLocalStatuses((prev) => ({ ...prev, [body.id]: "pending_review" }));
       }
       onChange([...photos, body.url]);
     } catch {
@@ -68,10 +82,23 @@ export function PhotoUploader({
   return (
     <div>
       <div className="grid grid-cols-3 gap-3 mb-2">
-        {photos.map((url, i) => (
+        {photos.map((url, i) => {
+          const id = url.split("/").pop() ?? "";
+          const status = statuses[id];
+          return (
           <div key={url} className="relative aspect-square rounded-lg overflow-hidden border border-black/10 group">
             {/* eslint-disable-next-line @next/next/no-img-element -- dynamic, auth-gated route, not a next/image-friendly domain */}
             <img src={url} alt={`Profile photo ${i + 1}`} className="w-full h-full object-cover" />
+            {status === "pending_review" && (
+              <span className="absolute top-1 right-1 bg-[var(--gold-soft)] text-ink text-[10px] font-medium px-1.5 py-0.5 rounded-full">
+                Pending review
+              </span>
+            )}
+            {status === "rejected" && (
+              <span className="absolute top-1 right-1 bg-[var(--maroon)] text-white text-[10px] font-medium px-1.5 py-0.5 rounded-full">
+                Not approved
+              </span>
+            )}
             <div className="absolute inset-x-0 bottom-0 flex items-center justify-between px-1.5 py-1 bg-black/55">
               <button
                 type="button"
@@ -105,7 +132,8 @@ export function PhotoUploader({
               </span>
             )}
           </div>
-        ))}
+          );
+        })}
 
         {photos.length < 3 && (
           <label

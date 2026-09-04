@@ -63,6 +63,7 @@ export default function ProfileOnboardingPage() {
   const [community, setCommunity] = useState("");
   const [relationshipIntent, setRelationshipIntent] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
+  const [photoStatuses, setPhotoStatuses] = useState<Record<string, string>>({});
 
   // Optional
   const [occupation, setOccupation] = useState("");
@@ -108,6 +109,7 @@ export default function ProfileOnboardingPage() {
         if (data.occupation) setOccupation(data.occupation);
         if (data.bio) setBio(data.bio);
         if (Array.isArray(data.photos)) setPhotos(data.photos);
+        if (data.photoStatuses) setPhotoStatuses(data.photoStatuses);
         if (data.years_out_of_relationship != null)
           setYearsOutOfRelationship(String(data.years_out_of_relationship));
         if (data.own_faith) {
@@ -578,6 +580,7 @@ export default function ProfileOnboardingPage() {
             onChange={setPhotos}
             disabled={!photoConsentAccepted}
             disabledReason="Accept the photo content guidelines above first"
+            statuses={photoStatuses}
           />
         </div>
 

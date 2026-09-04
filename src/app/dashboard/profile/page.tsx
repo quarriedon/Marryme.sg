@@ -9,7 +9,7 @@ import { auth } from "@/lib/auth";
 import { query, queryOne } from "@/lib/db";
 import { ageFromDob } from "@/lib/age";
 import { DeleteAccountSection } from "@/components/DeleteAccountSection";
-import type { Membership, UserRow } from "@/types/database";
+import type { Membership, PhotoRow, UserRow } from "@/types/database";
 
 const COMMUNITY_LABELS: Record<string, string> = {
   chinese: "Chinese",
@@ -69,6 +69,11 @@ export default async function MyProfilePage() {
 
   const age = user.date_of_birth ? ageFromDob(user.date_of_birth) : null;
   const photoUrl = user.photos?.[0];
+  const photoId = photoUrl?.split("/").pop();
+  const photoStatus = photoId
+    ? (await queryOne<Pick<PhotoRow, "status">>("SELECT status FROM photos WHERE id = ?", [photoId]))
+        ?.status
+    : null;
   const activeMatch = mutualMatches.find((m) => m.status === "active");
 
   return (
@@ -85,6 +90,12 @@ export default async function MyProfilePage() {
         <p className="font-sans text-xs uppercase tracking-wide opacity-50 mb-3">
           Preview — as others see it
         </p>
+        {photoStatus && photoStatus !== "approved" && (
+          <p className="font-sans text-xs text-[var(--maroon)] mb-3">
+            Your main photo is awaiting manual review and isn&rsquo;t visible to
+            other members yet — this preview is only visible to you.
+          </p>
+        )}
         <div className="flex gap-4 items-start">
           {photoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- dynamic, auth-gated route

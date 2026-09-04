@@ -12,10 +12,20 @@
 // manifests as an unrelated-looking Turbopack internal error rather
 // than a clear "too many threads" message.
 //
-// Defaults to 1 thread; respects an operator-set value so a future,
-// less-constrained host can raise it without editing this file.
+// Rayon isn't the only thread pool in the native binary — it also
+// runs a Tokio multi-threaded runtime, which spawns its own OS
+// threads independently of Rayon's. Capping only Rayon left Tokio
+// free to hit the same OS thread/process ceiling on its own
+// ("OS can't spawn worker thread: Resource temporarily unavailable
+// (os error 11)", a Tokio worker panic). TOKIO_WORKER_THREADS is a
+// real, intentionally-supported env var in this binary (confirmed
+// via `strings` on @next/swc-*), not a guess.
+//
+// Defaults to 1 thread each; respects an operator-set value so a
+// future, less-constrained host can raise it without editing this file.
 process.env.RAYON_NUM_THREADS ??= "1";
 process.env.RAYON_RS_NUM_CPUS ??= "1";
+process.env.TOKIO_WORKER_THREADS ??= "1";
 
 import { spawnSync } from "node:child_process";
 

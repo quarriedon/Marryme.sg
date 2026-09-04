@@ -237,3 +237,25 @@ CREATE TABLE IF NOT EXISTS photo_moderation_log (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_photo_moderation_log_user (user_id)
 );
+
+-- ============================================================
+-- photos — per-photo visibility/moderation state, keyed on the same
+-- id as the on-disk filename (see src/lib/storage.ts). A photo that
+-- fails automated moderation is still saved, but held invisible
+-- (pending_review) until an admin approves it in /admin/photos —
+-- see src/app/api/photos/upload/route.ts and src/app/api/photos/[id]/route.ts.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS photos (
+  id VARCHAR(255) PRIMARY KEY,
+  user_id CHAR(36) NOT NULL,
+  status ENUM('approved', 'pending_review', 'rejected') NOT NULL DEFAULT 'approved',
+  moderation_reason VARCHAR(255),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at DATETIME,
+  reviewed_by CHAR(36),
+
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_photos_user (user_id),
+  INDEX idx_photos_status (status)
+);

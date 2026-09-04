@@ -139,3 +139,15 @@ export type PhotoModerationLog = {
   reason: string;
   created_at: string;
 };
+
+export type PhotoStatus = "approved" | "pending_review" | "rejected";
+
+export type PhotoRow = {
+  id: string;
+  user_id: string;
+  status: PhotoStatus;
+  moderation_reason: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+};
