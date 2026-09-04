@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { moderatePhoto } from "@/lib/moderation";
-import { InvalidPhotoError, savePhoto, validatePhotoFile } from "@/lib/storage";
+import { InvalidPhotoError, savePhoto, StorageError, validatePhotoFile } from "@/lib/storage";
 
 /**
  * Accepts one photo at a time (the profile form calls this once per
@@ -42,7 +42,25 @@ export async function POST(request: NextRequest) {
   const buffer = Buffer.from(await file.arrayBuffer());
 
   const moderation = await moderatePhoto(buffer);
-  const id = await savePhoto(buffer, file.type);
+
+  let id: string;
+  try {
+    id = await savePhoto(buffer, file.type);
+  } catch (err) {
+    if (err instanceof StorageError) {
+      // Detailed cause is already logged server-side inside
+      // savePhoto()/ensureUploadsDir() — this is deliberately a
+      // proper JSON error response (not an unhandled 500) so the
+      // client shows this message instead of the generic
+      // "check your connection" fallback that fires when the
+      // browser can't parse a non-JSON error page.
+      return NextResponse.json(
+        { error: "We couldn't save your photo right now — please try again shortly." },
+        { status: 500 }
+      );
+    }
+    throw err;
+  }
 
   if (!moderation.ok) {
     await query(
