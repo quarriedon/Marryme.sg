@@ -15,6 +15,17 @@ import path from "node:path";
  * a `path.join(process.cwd(), ...)` fallback here would make Next's
  * output file tracer think the whole project needs to ship inside
  * `.next/standalone` "to be safe", bloating every deploy).
+ *
+ * The value is used as-is (never joined with process.cwd()), so an
+ * absolute path (the recommended production setup — see .env.example)
+ * behaves identically whether the process was started as `next dev`,
+ * `next start`, or `node .next/standalone/server.js` from some other
+ * working directory. A relative path (fine for local dev, where
+ * `npm run dev` always runs from the repo root) is NOT recommended in
+ * production for exactly that reason: it resolves against whatever
+ * directory the Node process happened to be launched from, which
+ * standalone deployments don't guarantee — warn loudly rather than
+ * silently writing to a possibly-unexpected location.
  */
 function uploadsDir(): string {
   const configured = process.env.UPLOADS_DIR;
@@ -25,7 +36,55 @@ function uploadsDir(): string {
         "outside the deployment folder in production)."
     );
   }
+  if (process.env.NODE_ENV === "production" && !path.isAbsolute(configured)) {
+    console.warn(
+      `[storage] UPLOADS_DIR ("${configured}") is a relative path in production — ` +
+        `it will resolve against process.cwd() (currently "${process.cwd()}"), which ` +
+        "can differ from what you expect depending on how the Node process was " +
+        "started. Use an absolute path in production (see .env.example)."
+    );
+  }
   return configured;
+}
+
+export class StorageError extends Error {}
+
+/**
+ * Ensures UPLOADS_DIR exists, creating it (and any missing parents)
+ * if not. Runs once at server startup via instrumentation.ts's
+ * register() — the documented Next.js hook for one-time server init
+ * — so a misconfigured/missing directory is a loud, obvious log line
+ * before any request ever arrives, not a mysterious upload failure
+ * discovered later. Also called defensively before every write in
+ * savePhoto(), in case the directory is removed after startup (e.g.
+ * an unmounted volume) — success is memoized so this doesn't hit the
+ * filesystem on every request, but a *failure* is not memoized, so a
+ * transient problem (a volume that mounts a few seconds after the
+ * app starts) can self-heal on the next write instead of wedging the
+ * app until restart.
+ */
+let uploadsDirReady: Promise<void> | null = null;
+
+export async function ensureUploadsDir(): Promise<void> {
+  if (uploadsDirReady) return uploadsDirReady;
+
+  const dir = uploadsDir();
+  uploadsDirReady = mkdir(dir, { recursive: true })
+    .then(() => undefined)
+    .catch((err: NodeJS.ErrnoException) => {
+      uploadsDirReady = null; // don't cache the failure — allow retry on next call
+      console.error(
+        `[storage] Failed to create UPLOADS_DIR at "${dir}" ` +
+          `(resolved from process.cwd() "${process.cwd()}"): ` +
+          `${err.code ?? "UNKNOWN"} — ${err.message}`
+      );
+      throw new StorageError(
+        "Could not access the photo storage directory — check UPLOADS_DIR " +
+          "exists and is writable by the Node process."
+      );
+    });
+
+  return uploadsDirReady;
 }
 
 const MIME_TO_EXT: Record<string, string> = {
@@ -56,11 +115,20 @@ export async function savePhoto(buffer: Buffer, mimeType: string): Promise<strin
     throw new InvalidPhotoError("Please upload a JPG, PNG, or WebP image.");
   }
 
+  await ensureUploadsDir();
   const dir = uploadsDir();
-  await mkdir(dir, { recursive: true });
 
   const id = `${crypto.randomUUID()}.${ext}`;
-  await writeFile(path.join(dir, id), buffer);
+  try {
+    await writeFile(path.join(dir, id), buffer);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    console.error(
+      `[storage] Failed to write photo to "${path.join(dir, id)}": ` +
+        `${e.code ?? "UNKNOWN"} — ${e.message}`
+    );
+    throw new StorageError("Could not save the uploaded photo to disk.");
+  }
   return id;
 }
 
