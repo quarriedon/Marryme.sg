@@ -160,7 +160,7 @@ export function PhotoUploader({
 
       {error && <p className="font-sans text-xs text-[var(--maroon)] mb-1">{error}</p>}
       <p className="font-sans text-xs opacity-60">
-        {photos.length}/3 photos — at least 1 required. JPG, PNG, or WebP, up to 5MB each.
+        {photos.length}/3 photos — 3 required. JPG, PNG, or WebP, up to 5MB each.
       </p>
     </div>
   );
