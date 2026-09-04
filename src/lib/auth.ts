@@ -101,6 +101,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // JWT refresh), so this runs once per login — see the
         // Activity summary on /dashboard/profile.
         await query("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
+      } else if (token.id) {
+        // Re-checked on every request that reads the session (confirmed:
+        // this branch runs on every page/route that calls auth(), not
+        // just occasionally) — so promoting/demoting a user's role, or
+        // approving/suspending their account, directly in the database
+        // takes effect on their very next request instead of requiring
+        // a full logout/login to get a fresh JWT. A single indexed
+        // lookup by primary key; cheap at this app's scale.
+        const current = await queryOne<Pick<UserRow, "role" | "status">>(
+          "SELECT role, status FROM users WHERE id = ?",
+          [token.id]
+        );
+        if (current) {
+          token.role = current.role;
+          token.status = current.status;
+        }
       }
       return token;
     },
