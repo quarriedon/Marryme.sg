@@ -18,6 +18,20 @@ const nextConfig: NextConfig = {
     workerThreads: false,
   },
 
+  // The build's own "Running TypeScript" step OOM'd on that same
+  // host (Next.js build worker exited with SIGABRT — V8's own signal
+  // when it aborts on a JS heap allocation failure) even after the
+  // above. That step is redundant here anyway: `npx tsc --noEmit` is
+  // already run as a separate verification step before every push in
+  // this project's workflow, so type errors are still caught — this
+  // just stops the build itself from re-doing that memory-hungry
+  // check a second time on a host that can't afford it. If you ever
+  // build without running `tsc --noEmit` first, a type error could
+  // ship silently — don't rely on this flag as your only type check.
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+
   // The photo upload/serve routes read and write an operator-
   // configured directory (UPLOADS_DIR) at runtime — a dynamic file
   // path the output file tracer can't statically resolve, so it
