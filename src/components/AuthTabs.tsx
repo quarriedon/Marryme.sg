@@ -21,6 +21,19 @@ export function AuthTabs({ intent }: { intent: Intent }) {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
+  /**
+   * next-auth's client signIn() (with redirect: false) doesn't return
+   * the user's role — only { error, status, ok, url } — so an admin
+   * signing in from /login has to be routed to /admin explicitly by
+   * checking the session that was just established, rather than
+   * always landing on /dashboard/matches regardless of role.
+   */
+  async function redirectAfterSignIn() {
+    const res = await fetch("/api/auth/session");
+    const session = await res.json().catch(() => null);
+    router.push(session?.user?.role === "admin" ? "/admin" : "/dashboard/matches");
+  }
+
   async function handleEmailSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -50,9 +63,11 @@ export function AuthTabs({ intent }: { intent: Intent }) {
         setError("Incorrect email or password.");
         return;
       }
-      router.push(
-        intent === "signup" ? "/onboarding/personality-test" : "/dashboard/matches"
-      );
+      if (intent === "signup") {
+        router.push("/onboarding/personality-test");
+      } else {
+        await redirectAfterSignIn();
+      }
     } catch {
       setError("Something went wrong — please check your connection and try again.");
     } finally {
@@ -101,9 +116,11 @@ export function AuthTabs({ intent }: { intent: Intent }) {
         setError("That code didn't work — check it and try again.");
         return;
       }
-      router.push(
-        intent === "signup" ? "/onboarding/personality-test" : "/dashboard/matches"
-      );
+      if (intent === "signup") {
+        router.push("/onboarding/personality-test");
+      } else {
+        await redirectAfterSignIn();
+      }
     } catch {
       setError("Something went wrong — please check your connection and try again.");
     } finally {
