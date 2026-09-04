@@ -151,3 +151,12 @@ export type PhotoRow = {
   reviewed_at: string | null;
   reviewed_by: string | null;
 };
+
+export type EmailType = "welcome" | "incomplete_profile_nudge";
+
+export type EmailEvent = {
+  id: string;
+  user_id: string;
+  email_type: EmailType;
+  sent_at: string;
+};

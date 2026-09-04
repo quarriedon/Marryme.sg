@@ -200,7 +200,7 @@ export default function ProfileOnboardingPage() {
     if (!community) return "Community is required.";
     if (!relationshipIntent) return "Relationship intent is required.";
     if (!faithMatters) return "Please answer whether faith matters to you in a partner.";
-    if (photos.length < 1) return "Please upload at least 1 photo.";
+    if (photos.length !== 3) return "Please upload exactly 3 photos.";
     if (!termsAccepted) return "You must accept the Privacy Policy and Terms of Service.";
     if (!photoConsentAccepted) return "You must accept the photo content guidelines.";
     return null;

@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import { auth } from "@/lib/auth";
 import { query, queryOne } from "@/lib/db";
 import { ageFromDob } from "@/lib/age";
+import { sendMail } from "@/lib/email";
+import { welcomeEmail } from "@/lib/emailTemplates";
 import type { PhotoRow, UserRow } from "@/types/database";
 
 /** Lets the profile form pre-fill known values (email/phone from signup, or a previous partial submission) and know which fields it still needs to collect. */
@@ -121,8 +123,8 @@ export async function POST(request: NextRequest) {
   if (typeof faithMattersToThem !== "boolean") {
     errors.push("Please answer whether faith matters to you in a partner.");
   }
-  if (!Array.isArray(photos) || photos.length < 1 || photos.length > 3) {
-    errors.push("Please upload between 1 and 3 photos.");
+  if (!Array.isArray(photos) || photos.length !== 3) {
+    errors.push("Please upload exactly 3 photos.");
   } else if (!photos.every((p) => typeof p === "string" && p.startsWith("/api/photos/"))) {
     errors.push("One or more photos didn't upload correctly — please re-add them.");
   }
@@ -181,9 +183,15 @@ export async function POST(request: NextRequest) {
     passwordHashToSet = await bcrypt.hash(password, 10);
   }
 
-  // Onboarding has no manual review queue yet — completing it
-  // auto-approves the profile so it's immediately eligible for
-  // matching. Add a real review step before launch (see README).
+  // Manual profile review (see /admin/users/[id]) — a completed
+  // profile lands as 'pending' until an admin approves it, rather
+  // than being immediately eligible for matching. Set
+  // MANUAL_PROFILE_REVIEW_ENABLED=false to go back to auto-approving
+  // on completion (e.g. if review capacity can't keep up with
+  // signups yet).
+  const manualReviewEnabled = process.env.MANUAL_PROFILE_REVIEW_ENABLED !== "false";
+  const statusToSet = manualReviewEnabled ? "pending" : "approved";
+
   await query(
     `UPDATE users SET
       email = ?,
@@ -211,7 +219,7 @@ export async function POST(request: NextRequest) {
       preferred_location = ?,
       terms_accepted_at = COALESCE(terms_accepted_at, NOW()),
       photo_consent_accepted_at = COALESCE(photo_consent_accepted_at, NOW()),
-      status = 'approved'
+      status = ?
      WHERE id = ?`,
     [
       emailToSet,
@@ -237,6 +245,7 @@ export async function POST(request: NextRequest) {
       preferredAgeMin || null,
       preferredAgeMax || null,
       preferredLocation || null,
+      statusToSet,
       session.user.id,
     ]
   );
@@ -259,6 +268,31 @@ export async function POST(request: NextRequest) {
       await query(
         "INSERT INTO memberships (id, user_id, tier, started_at, expires_at) VALUES (UUID(), ?, 'founding', NOW(), ?)",
         [session.user.id, expiresAt]
+      );
+    }
+  }
+
+  // Welcome email — sent once, right here, since this is the moment
+  // an account first becomes a real usable member (signup alone only
+  // has an email, no name/profile yet) and lines up with the founding
+  // membership grant just above ("welcoming them as a founding
+  // member"). email_events' unique constraint is the actual guard
+  // against sending this twice if the form is ever resubmitted (e.g.
+  // updating a rejected profile) — recorded only on a confirmed send
+  // (not before), so a signup that happens before SMTP is configured
+  // gets its welcome email once it is, instead of being silently
+  // marked "sent" forever for an email that never went out.
+  const alreadyWelcomed = await queryOne<{ id: string }>(
+    "SELECT id FROM email_events WHERE user_id = ? AND email_type = 'welcome' LIMIT 1",
+    [session.user.id]
+  );
+  if (!alreadyWelcomed && emailToSet) {
+    const { subject, text, html } = welcomeEmail(fullName.trim());
+    const sent = await sendMail({ to: emailToSet, subject, text, html });
+    if (sent) {
+      await query(
+        "INSERT INTO email_events (id, user_id, email_type) VALUES (UUID(), ?, 'welcome')",
+        [session.user.id]
       );
     }
   }
