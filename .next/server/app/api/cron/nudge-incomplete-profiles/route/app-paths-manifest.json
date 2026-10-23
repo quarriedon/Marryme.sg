@@ -1,0 +1,3 @@
+{
+  "/api/cron/nudge-incomplete-profiles/route": "app/api/cron/nudge-incomplete-profiles/route.js"
+}

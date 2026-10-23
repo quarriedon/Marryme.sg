@@ -1,0 +1,17 @@
+{
+  "node": {
+    "00c5d3ad953d63ef732c1b4ed41c973b3dfdee5857": {
+      "workers": {
+        "app/dashboard/relationship/page": {
+          "moduleId": 50881,
+          "async": false,
+          "exportedName": "$$RSC_SERVER_ACTION_0",
+          "filename": "src/app/dashboard/layout.tsx"
+        }
+      },
+      "exportedName": "$$RSC_SERVER_ACTION_0",
+      "filename": "src/app/dashboard/layout.tsx"
+    }
+  },
+  "edge": {}
+}

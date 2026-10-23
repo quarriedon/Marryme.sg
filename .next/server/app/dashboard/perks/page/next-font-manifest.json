@@ -1,0 +1,12 @@
+{
+  "pages": {},
+  "app": {
+    "[project]/src/app/dashboard/perks/page": [
+      "static/media/3c7c6164b2587822-s.p.16u3vygyjnhr0.woff2",
+      "static/media/03bda585a99c6450-s.p.32sris142tqlb.woff2",
+      "static/media/03fc1b4a8d284b5e-s.p.0wiir8udbzjvx.woff2"
+    ]
+  },
+  "appUsingSizeAdjust": true,
+  "pagesUsingSizeAdjust": false
+}

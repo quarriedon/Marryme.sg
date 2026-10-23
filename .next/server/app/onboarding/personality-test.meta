@@ -1,0 +1,16 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/onboarding/layout,_N_T_/onboarding/personality-test/layout,_N_T_/onboarding/personality-test/page,_N_T_/onboarding/personality-test"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/onboarding/personality-test/__PAGE__",
+    "/onboarding/personality-test",
+    "/onboarding",
+    "/_index",
+    "/_head"
+  ]
+}

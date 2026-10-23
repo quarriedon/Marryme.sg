@@ -1,0 +1,3 @@
+{
+  "/api/onboarding/verify-phone/route": "app/api/onboarding/verify-phone/route.js"
+}
