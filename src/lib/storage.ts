@@ -51,17 +51,20 @@ export class StorageError extends Error {}
 
 /**
  * Ensures UPLOADS_DIR exists, creating it (and any missing parents)
- * if not. Runs once at server startup via instrumentation.ts's
- * register() — the documented Next.js hook for one-time server init
- * — so a misconfigured/missing directory is a loud, obvious log line
- * before any request ever arrives, not a mysterious upload failure
- * discovered later. Also called defensively before every write in
- * savePhoto(), in case the directory is removed after startup (e.g.
- * an unmounted volume) — success is memoized so this doesn't hit the
- * filesystem on every request, but a *failure* is not memoized, so a
- * transient problem (a volume that mounts a few seconds after the
- * app starts) can self-heal on the next write instead of wedging the
- * app until restart.
+ * if not. Called defensively before every write in savePhoto() — not
+ * also at server startup via an instrumentation.ts hook, as originally
+ * built: that hook's import of this module gave Next's output file
+ * tracer a second, route-less trace root with no outputFileTracingExcludes
+ * glob able to target it (that option is explicitly keyed by route
+ * path — see the Output File Tracing docs' "Caveats" — and
+ * instrumentation.ts has no route), so the whole project (.git,
+ * src/, mysql/, docs) leaked into every .next/standalone build
+ * again. Not worth it for a "fails loud a few seconds earlier"
+ * nicety. Success is memoized so this doesn't hit the filesystem on
+ * every request, but a *failure* is not memoized, so a transient
+ * problem (a volume that mounts a few seconds after the app starts)
+ * can self-heal on the next upload instead of wedging the app until
+ * restart.
  */
 let uploadsDirReady: Promise<void> | null = null;
 

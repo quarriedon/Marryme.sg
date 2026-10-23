@@ -46,7 +46,15 @@ const nextConfig: NextConfig = {
   // place — but verify with `du -sh .next/standalone` after any
   // future change here that .git/src/mysql/docs haven't crept back in.
   outputFileTracingExcludes: {
-    "/*": [".git/**", "src/**", "mysql/**", "scripts/**", "*.md"],
+    "/*": [
+      ".git/**",
+      "src/**",
+      "mysql/**",
+      "scripts/**",
+      "*.md",
+      "*.config.*",
+      "tsconfig.json",
+    ],
   },
 };
 
