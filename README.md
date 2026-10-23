@@ -59,9 +59,33 @@ Profile photos (1–3, JPG/PNG/WebP, 5MB max each) go through `POST /api/photos/
 - **`GOOGLE_CLOUD_VISION_API_KEY`** — without it, uploads skip moderation entirely (a warning is logged on every upload, and every photo is saved as `approved`) rather than blocking uploads in environments that haven't set it up. Set this before launch, or photos are not being screened for inappropriate content or checked for a visible face.
 - A photo Vision flags is **not** rejected outright — it's saved and held as `pending_review` (the `photos` table tracks this), invisible to everyone but its owner and admins (enforced in `GET /api/photos/[id]`, the one route every viewing path goes through), until an admin approves or rejects it in `/admin/photos`. Rejecting also frees up the member's photo slot by removing it from their `users.photos` array. Rejections are also logged to `photo_moderation_log` for reviewing abuse patterns later.
 
-## Deploying on Plesk (Node.js)
+## Continuous deployment (GitHub Actions → Plesk)
 
-This uses Next's [`output: "standalone"`](https://nextjs.org/docs/app/api-reference/config/next-config-js/output) build (set in `next.config.ts`), which traces only the files the server actually needs and outputs a self-contained app at `.next/standalone/` — including its own minimal `server.js`. There's no hand-written custom server in this repo anymore; Plesk runs the one Next generates.
+The Plesk VPS this runs on has repeatedly failed to run `next build` itself — a CloudLinux LVE process/thread ceiling (fixed earlier by capping Rayon/Tokio thread pools in `scripts/run-build.mjs`), then a memory ceiling that killed the build's own TypeScript-checking step (fixed by `typescript.ignoreBuildErrors` in `next.config.ts`, since `tsc --noEmit` already runs as a separate check in CI), then the same memory ceiling again during static page generation. Three different resources, same host, same conclusion: **don't build on this host at all.** `.github/workflows/ci-deploy.yml` does the entire thing for you now:
+
+- **`check`** job — runs on every pull request and every push to `main`: `npm ci`, `npx tsc --noEmit`, `npx eslint .`, `npm run build`. A broken build is caught on the PR, before anyone looks at it, not discovered on the server.
+- **`deploy`** job — runs only after a push to `main`, only if `check` passed. Rebuilds (GitHub Actions jobs don't share a filesystem, so it can't just reuse `check`'s build) and publishes `.next/standalone/` — the complete, self-contained compiled app (`server.js`, the traced subset of `node_modules`, `public/` and `.next/static/` already merged in by the `postbuild` script) — to a dedicated `deploy` branch. No `npm install`, no `npm run build`, no Turbopack, no `tsc` ever has to run on the Plesk host again.
+
+No GitHub repository secrets are needed for any of this. Every route that touches the database, auth, or the filesystem is server-rendered on demand (`ƒ` in the build's route table), not statically prerendered — `next build` never needs real `MYSQL_*`/`AUTH_SECRET`/etc. to succeed, only at runtime. Verified by building with zero environment variables set before this workflow was written. Your real credentials stay exactly where they already are: Plesk's Node.js panel → Custom environment variables.
+
+**One-time Plesk setup:**
+
+1. **Websites & Domains → your domain → Git** (Plesk's Git extension). If it's currently pulling from `main`, change the branch it tracks to **`deploy`**.
+   - If you've instead been pulling manually over SSH, switch that to `git fetch origin deploy && git reset --hard origin/deploy` run from your Application Root.
+2. **Node.js panel → Application Startup File**: set to `server.js` (not `.next/standalone/server.js` — the `deploy` branch *is* the standalone output, flattened to its own root, so `server.js` is already at the top level).
+3. **Turn off any "Run NPM Install" / "Run Build" automation** Plesk's Git extension offers on pull — there's nothing to install or build anymore, the branch already contains the finished app.
+4. Leave environment variables exactly as they are — this doesn't touch them.
+5. Confirm Plesk's Git extension can auto-restart the app after a pull (most versions have this as a post-deploy action); if not, click **Restart App** manually after each pull.
+
+**Day to day**, this becomes: merge a PR into `main` → GitHub Actions builds and pushes to `deploy` automatically (watch it under the repo's **Actions** tab) → pull in Plesk (automatic if your Git extension polls, or click **Pull Updates**) → restart if that isn't automatic too. No SSH, no manual zip, no `npm run build` on the host, ever.
+
+The `deploy` branch is managed entirely by the workflow — never commit to it by hand, it gets overwritten (not force-pushed; see the workflow's comments for why) on every deploy.
+
+## Deploying on Plesk (Node.js) — manual fallback / troubleshooting history
+
+Keep this around in case GitHub Actions is ever unavailable, or for the history of exactly what failed on this host and why — it's load-bearing context if a future build failure looks similar.
+
+This uses Next's [`output: "standalone"`](https://nextjs.org/docs/app/api-reference/config/next-config-js/output) build (set in `next.config.ts`), which traces only the files the server actually needs and outputs a self-contained app at `.next/standalone/` — including its own minimal `server.js`. There's no hand-written custom server in this repo anymore.
 
 1. **Push to GitHub** first (if you haven't already):
    ```bash
@@ -90,25 +114,18 @@ This uses Next's [`output: "standalone"`](https://nextjs.org/docs/app/api-refere
 
 `npm run build` runs through `scripts/run-build.mjs`, which sets `RAYON_NUM_THREADS=1`, `RAYON_RS_NUM_CPUS=1`, and `TOKIO_WORKER_THREADS=1` before invoking `next build` to cap all of them — safe on any host (only limits parallelism, never correctness), and it won't override a variable you've already set yourself, so a future, less-constrained host can raise them. If a build still fails after this with a *different* native thread/process error, the pattern is the same: check which env var the specific Rust thread pool reads (`strings node_modules/@next/swc-*/*.node | grep -i thread` is how these three were found) and add it to `run-build.mjs`. If it's genuine memory exhaustion rather than a thread-count ceiling, the error won't mention threads/processes at all — check the actual memory limit Plesk enforces on the Node.js application (separate from the VPS's total RAM) and raise it if possible. As a last resort, `next build --webpack` avoids Turbopack's native thread pools entirely (slower, but a real fallback if this specific host's thread ceiling turns out to be lower than any of these pools can be configured down to).
 
-**If the host's process/thread ceiling is below what any of these env vars can reach** (for example, a CloudLinux LVE account limit that's invisible to `ulimit` and enforced at the kernel level) — capping Rayon and Tokio to 1 thread each still spawns more than one OS thread/process at a time during a build (Node itself, the `next-swc` native addon, and the worker threads/processes it forks all count against the ceiling), so a build can keep failing with the same `EAGAIN` / `os error 11` even at the lowest possible settings. If that's the case, stop building on the Plesk host entirely — build the app somewhere without that ceiling, and deploy only the already-compiled output:
+`typescript.ignoreBuildErrors: true` in `next.config.ts` addresses a *different* resource: the build's own TypeScript-checking step OOM'd (`Next.js build worker exited with code: null and signal: SIGABRT` — V8's own signal when it aborts on a JS heap allocation failure) even with the above thread caps in place. Safe here specifically because `npx tsc --noEmit` is already run as a real, separate verification step in CI — don't rely on this flag as your only type check if you ever build without that step first.
+
+**If the host's process/thread ceiling is below what any of these env vars can reach** (for example, a CloudLinux LVE account limit that's invisible to `ulimit` and enforced at the kernel level) — capping Rayon and Tokio to 1 thread each still spawns more than one OS thread/process at a time during a build (Node itself, the `next-swc` native addon, and the worker threads/processes it forks all count against the ceiling), so a build can keep failing with the same `EAGAIN` / `os error 11` even at the lowest possible settings. Static page generation hit this same ceiling too, even already capped to a single worker — there is no further concurrency knob below that. If you're in this position, the GitHub Actions pipeline above isn't optional troubleshooting, it's the fix: build the app somewhere without that ceiling, and deploy only the already-compiled output. The manual version of that (if Actions itself is ever unavailable):
 
 1. **Build locally or in CI**, using the exact same Node major version as the Plesk app (check Plesk's Node.js panel for the version currently selected) so any platform-specific native binaries match:
    ```bash
    npm ci
    npm run build   # produces .next/standalone/, .next/static/, and runs postbuild
    ```
-   This runs on your own machine or a CI runner (GitHub Actions, etc.) — nothing here touches the Plesk host's thread/process limits, because Turbopack never runs there.
-2. **Copy three things to the server**, preserving this layout under your Application Root:
-   - `.next/standalone/` → the whole directory, including the `server.js` Next generated and the `public/` + `.next/static/` files `scripts/copy-standalone-assets.mjs` already merged into it during `postbuild`. Nothing else needs copying manually — that script's whole job is to make `.next/standalone/` self-contained.
-   - `node_modules/` is **not** needed separately — `output: "standalone"` traces and includes only the runtime dependencies actually used, already inside `.next/standalone/node_modules/`.
-   - You do **not** need to copy `src/`, `.git/`, or any dev dependency — none of it is required to run the built app.
-   - A simple way to move it: `rsync -avz --delete .next/standalone/ user@server:/path/to/app-root/` (or zip it and upload through Plesk's File Manager if you don't have SSH `rsync` access).
-3. **In Plesk's Node.js panel**, set "Application Startup File" to `server.js` (now at the root of what you uploaded, since you uploaded the *contents* of `.next/standalone/`, not the folder itself) and skip **NPM Install** and **Run Build** entirely — there's nothing to install or build on the server anymore, only `node server.js` to run.
-4. **Set the same environment variables** as before (Plesk Node.js panel → Custom environment variables) — the compiled app still reads `MYSQL_*`, `AUTH_SECRET`, `AUTH_URL`, `UPLOADS_DIR`, etc. at runtime, same as any other deploy.
-5. **Restart App** in the Plesk Node.js panel.
-6. For future changes: repeat step 1 on your machine/CI, then re-sync `.next/standalone/` to the server and restart — there's no `git pull` + `Run Build` cycle on the host anymore, since the host never builds anything.
-
-This trades a one-click "pull and build on the server" workflow for a manual (or CI-automated) upload step, but it fully avoids Turbopack's native thread pools on a host where they can't be brought under the account's ceiling no matter how low the pool sizes are set.
+2. **Copy `.next/standalone/`'s contents** (not the folder itself) to the server — `rsync -avz --delete .next/standalone/ user@server:/path/to/app-root/`, or zip and upload through Plesk's File Manager.
+3. **Application Startup File** → `server.js`, skip **NPM Install** and **Run Build** entirely.
+4. Same environment variables as any other deploy; **Restart App**.
 
 **Reverse proxy note:** Plesk's Node.js hosting sits behind its own reverse proxy (nginx/Apache) in front of the Node app. NextAuth needs to see the real public host and protocol to set cookies and validate sign-in correctly — `trustHost: true` is set in `src/lib/auth.ts` for this, and `AUTH_URL` should be set to your real `https://` domain in the environment variables. If login ever silently does nothing again (no error, no redirect) after this is all working, check that the proxy is forwarding `X-Forwarded-Host` / `X-Forwarded-Proto` correctly — a mismatch there is the next most likely cause after a static-asset problem.
 

@@ -1,0 +1,93 @@
+name: CI & Deploy
+
+# Builds off the fragile Plesk host entirely. `check` runs on every PR
+# and push to main (tsc, eslint, a real `next build`) so a broken
+# build is caught before it's ever deployed, not discovered on the
+# server. `deploy` runs only after a push to main and only if `check`
+# passed; it rebuilds (jobs don't share a filesystem, so this can't
+# just reuse `check`'s build) and publishes .next/standalone — the
+# self-contained compiled app, see next.config.ts's `output:
+# "standalone"` — to the `deploy` branch. Plesk's Git integration
+# pulls *that* branch directly as its Application Root and runs only
+# `node server.js`: no npm install, no npm run build, no Turbopack or
+# tsc ever touching the constrained host again. See the "Continuous
+# deployment" section in README.md for the one-time Plesk setup this
+# depends on.
+#
+# No repository secrets are required: every route that touches the
+# database, auth, or the filesystem is server-rendered on demand
+# (marked "ƒ" in the build's route table), not statically prerendered
+# — `next build` never needs real MYSQL_*/AUTH_SECRET/etc. to
+# succeed, only at runtime, where they're still set directly in
+# Plesk's Node.js panel as before. Verified by building with zero env
+# vars set before writing this workflow.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "23"
+          cache: "npm"
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx eslint .
+      - run: npm run build
+
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "23"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+
+      - name: Publish .next/standalone to the deploy branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SHA=$(git rev-parse --short HEAD)
+          WORKTREE=$(mktemp -d)
+
+          git fetch origin deploy 2>/dev/null || true
+
+          if git show-ref --verify --quiet refs/remotes/origin/deploy; then
+            git worktree add -B deploy "$WORKTREE" origin/deploy
+          else
+            echo "No deploy branch yet — creating it."
+            git worktree add --detach "$WORKTREE" HEAD
+            (cd "$WORKTREE" && git checkout --orphan deploy && git rm -rf . > /dev/null 2>&1 || true)
+          fi
+
+          # Replace everything in the worktree with this build's fresh
+          # output — never accumulate stale files from a previous deploy.
+          find "$WORKTREE" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cp -a .next/standalone/. "$WORKTREE"/
+          echo "node_modules/.cache/" > "$WORKTREE/.gitignore"
+
+          cd "$WORKTREE"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Build output unchanged — nothing to deploy."
+          else
+            git commit -m "Deploy ${SHA}"
+            git push origin HEAD:deploy
+          fi
