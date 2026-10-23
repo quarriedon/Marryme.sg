@@ -32,28 +32,41 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
 
-  // The photo upload/serve routes read and write an operator-
-  // configured directory (UPLOADS_DIR) at runtime — a dynamic file
-  // path the output file tracer can't statically resolve, so it
-  // falls back to bundling the *entire* project into
-  // .next/standalone "to be safe" (source, .git, docs, the lot) and
-  // prints a "whole project was traced unintentionally" warning on
-  // every build. None of that extra bulk is actually needed at
-  // runtime (the compiled server lives under .next/server, not
-  // src/), so trim it back out explicitly. The warning itself still
-  // prints — it's just Turbopack being noisy about the same dynamic
-  // file access that made this exclude list necessary in the first
-  // place — but verify with `du -sh .next/standalone` after any
-  // future change here that .git/src/mysql/docs haven't crept back in.
+  // The photo upload/serve routes (and account deletion, which also
+  // cleans up photo files) read and write an operator-configured
+  // directory (UPLOADS_DIR) at runtime — a dynamic file path the
+  // output file tracer can't statically resolve, so for every route
+  // that touches it, it falls back to bundling the *entire* project
+  // into .next/standalone "to be safe" (source, .git, docs, CI
+  // config, the lot) and prints a "whole project was traced
+  // unintentionally" warning. None of that extra bulk is actually
+  // needed at runtime (the compiled server lives under .next/server,
+  // not src/), so trim it back out explicitly — by exact name, not
+  // just a few extensions, since this fallback isn't selective about
+  // *what* extra bulk it pulls in: anything missing from this list
+  // leaks straight through. If you add a new top-level file or
+  // folder to the repo (another script, another doc, a new config
+  // file), add it here too, and verify with `find .next/standalone
+  // -maxdepth 1` after any change here — don't just check `du -sh`,
+  // since a leaked file can be small enough not to move the size
+  // needle at all while still being wrong to ship (this is exactly
+  // how `.github/workflows/` leaked in unnoticed once before).
   outputFileTracingExcludes: {
     "/*": [
+      ".env.example",
       ".git/**",
-      "src/**",
-      "mysql/**",
-      "scripts/**",
+      ".github/**",
+      ".gitignore",
       "*.md",
-      "*.config.*",
+      "eslint.config.mjs",
+      "mysql/**",
+      "next-env.d.ts",
+      "next.config.ts",
+      "postcss.config.mjs",
+      "scripts/**",
+      "src/**",
       "tsconfig.json",
+      "tsconfig.tsbuildinfo",
     ],
   },
 };
